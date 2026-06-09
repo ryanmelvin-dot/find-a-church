@@ -1,8 +1,9 @@
 /* ─── Design tokens — mirroring INUMC.org ───────────────────────────────── */
 :root {
   /* Brand colors */
-  --red:           #f61b37;   /* primary CTA / accent */
+  --red:           #f61b37;   /* brand red — large text & decorative fills only */
   --red-hover:     #d41530;
+  --red-text:      #d41530;   /* red for small text — 5.3:1 on white (WCAG AA) */
   --charcoal:      #303039;   /* header background */
   --dark:          #141827;   /* body text / headings */
   --accent-light:  #ffffff;   /* light accent on dark backgrounds */
@@ -62,7 +63,7 @@ body {
 }
 
 a {
-  color: var(--red);
+  color: var(--red-text);
   transition: color 0.15s;
 }
 
@@ -284,7 +285,7 @@ a:hover {
 }
 
 .field input::placeholder {
-  color: var(--text-disabled);
+  color: #767676;   /* readable placeholder — ~4.3:1 on the tinted field bg */
 }
 
 .field-with-icon {
@@ -373,13 +374,14 @@ a:hover {
   position: relative;
 }
 
-/* The sliding red pill — JS positions it under the active button */
+/* The sliding red pill — JS positions it under the active button.
+   Darker red so the white 13px label passes WCAG AA contrast. */
 .view-toggle-slider {
   position: absolute;
   top: 3px;
   left: 3px;
   height: calc(100% - 6px);
-  background: var(--red);
+  background: var(--red-hover);
   border-radius: 18px;
   transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1),
               width    0.22s cubic-bezier(0.4, 0, 0.2, 1);
@@ -448,6 +450,13 @@ a:hover {
   border-left-color: var(--red);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
   transform: translateY(-2px);
+}
+
+/* Keyboard focus indicator for clickable cards and map sidebar items */
+.card:focus-visible,
+.map-item:focus-visible {
+  outline: 3px solid var(--blue-focus);
+  outline-offset: 2px;
 }
 
 /* ─── Church photo cover (top of card) ──────────────────────────────────── */
@@ -585,7 +594,7 @@ a:hover {
 .card-link {
   font-size: 14px;
   font-weight: 600;
-  color: var(--red);
+  color: var(--red-text);
   text-decoration: none;
 }
 
@@ -643,8 +652,9 @@ a:hover {
 }
 
 .page-btn.is-active {
-  background: var(--red);
-  border-color: var(--red);
+  /* Darker red so the white label passes WCAG AA contrast */
+  background: var(--red-hover);
+  border-color: var(--red-hover);
   color: #ffffff;
   font-weight: 600;
 }
@@ -838,7 +848,7 @@ a:hover {
 }
 
 .list-svc-meta {
-  color: var(--red);
+  color: var(--red-text);
   font-weight: 500;
   margin-left: 3px;
 }
@@ -859,7 +869,7 @@ a:hover {
   display: block;
   font-size: 13px;
   font-weight: 600;
-  color: var(--red);
+  color: var(--red-text);
   text-decoration: none;
 }
 
@@ -977,7 +987,7 @@ a:hover {
 
 .map-item-svcs div {
   font-size: 11px;
-  color: var(--red);
+  color: var(--red-text);
   font-weight: 500;
   line-height: 1.5;
 }
@@ -1044,7 +1054,7 @@ a:hover {
 .map-directions-btn {
   font-size: 12px;
   font-weight: 600;
-  color: var(--red);
+  color: var(--red-text);
   text-decoration: none;
   white-space: nowrap;
   flex-shrink: 0;
@@ -1205,7 +1215,7 @@ a:hover {
 
 .modal-svc-time {
   font-size: 13px;
-  color: var(--red);
+  color: var(--red-text);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1243,7 +1253,7 @@ a:hover {
 }
 
 .modal-contact-value a {
-  color: var(--red);
+  color: var(--red-text);
   text-decoration: none;
 }
 
@@ -1266,7 +1276,7 @@ a:hover {
   display: inline-block;
   font-size: 13px;
   font-weight: 600;
-  color: var(--red);
+  color: var(--red-text);
   text-decoration: none;
   margin-bottom: 4px;
   padding-left: 16px;
@@ -1360,10 +1370,6 @@ a:hover {
   .header-inner {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .hero-content {
-    padding: 20px 16px;
   }
 
   .hero h1 {

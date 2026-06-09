@@ -7,7 +7,7 @@
 
 A public-facing **"Find a Church" web directory** for the Indiana Conference of The United Methodist Church. The site allows anyone to search and browse churches across Indiana, filtering by service day, service time, and district, with three display options: Cards, List, and Map.
 
-The site is themed to match **INUMC.org** — dark charcoal header, red accent color (#f61b37), gold secondary accent, Poppins body font, and Lora serif headings — giving it a consistent, on-brand look and feel.
+The site is themed to match **INUMC.org** — dark charcoal header, red accent color (#f61b37), and Poppins typography — giving it a consistent, on-brand look and feel.
 
 ---
 
@@ -15,13 +15,18 @@ The site is themed to match **INUMC.org** — dark charcoal header, red accent c
 
 | File | Purpose |
 |---|---|
-| `index.html` | The public-facing webpage — all layout and structure |
-| `styles.css` | All visual styling, colors, fonts, and responsive layout |
-| `scripts.js` | All JavaScript logic — fetches data, filters, and renders views |
-| `netlify/functions/churches.js` | Secure serverless function — calls Airtable API server-side |
-| `netlify.toml` | Netlify deployment configuration |
-| `.env` | Local development secrets (never committed to git) |
+| `public/index.html` | The public-facing webpage — all layout and structure |
+| `public/styles.css` | All visual styling, colors, fonts, and responsive layout |
+| `public/scripts.js` | All JavaScript logic — fetches data, filters, and renders views |
+| `public/assets/` | Logo and other static images |
+| `netlify/functions/churches.mjs` | Secure serverless function — calls Airtable API server-side |
+| `netlify.toml` | Netlify deployment configuration (publishes only `public/`) |
+| `.env` | Local development secrets (never committed to git, never deployed) |
 | `.gitignore` | Prevents secrets and junk files from being committed |
+
+> **Why a `public/` folder?** Only the files inside `public/` are ever uploaded
+> to the website. Secrets (`.env`) and internal documents like this one stay in
+> the project root, where no deploy can ever publish them.
 
 ---
 
@@ -33,25 +38,25 @@ The website has no local copy of church data baked into the code. Instead, every
 
 ### Data structure in Airtable
 
-The directory uses two tables inside one Airtable base, joined together by the `GCFA#` field (the unique identifier for each church):
+The directory uses two tables inside one Airtable base, joined together by the `GCFA ID` field (the unique identifier for each church). **The column must be named `GCFA ID` in both tables** — small differences in case or punctuation (e.g., `gcfa id`, `GCFA-ID`) are tolerated, but a different name like `GCFA#` will not match and the directory will appear empty.
 
 **Churches table** — one row per church
-- `GCFA#` — unique church identifier (the join key)
+- `GCFA ID` — unique church identifier (the join key)
 - `Account Name` — church name
 - `District` — conference district
-- `Phone`
+- `Phone` *(optional)*
 - `Primary Email`
 - `Physical Address (Street)`, `(City)`, `(State/Province)`, `(ZIP/Postal Code)`
-- `Website`
+- `Website` *(optional)*
+- An attachment column with a church photo *(optional — auto-detected regardless of column name)*
 
 **Services table** — one row per worship service (a church can have multiple)
-- `GCFA#` — links back to the church
-- `Service Name` — e.g., "Sunday Morning Worship"
+- `GCFA ID` — links back to the church
+- `Service Time Name` — e.g., "Sunday Morning Worship"
 - `Service Time` — e.g., "9:00 AM"
 - `Service Day` — e.g., "Sunday"
-- `Service Type` — e.g., "In-Person", "Online"
 
-When the page loads, the code fetches both tables, matches each service to its church using the `GCFA#` field, and displays the combined result as a card, list row, or map pin.
+When the page loads, the code fetches both tables, matches each service to its church using the `GCFA ID` field, and displays the combined result as a card, list row, or map entry.
 
 ---
 
@@ -63,7 +68,7 @@ A major concern with web directories is keeping API credentials out of the hands
 Any value written directly in a `.js` file is visible to anyone who opens their browser's developer tools. Putting an Airtable API token in the JavaScript code would mean anyone could copy it and read (or write to) your Airtable base.
 
 ### The solution: a serverless proxy function
-Rather than calling Airtable directly from the browser, the website calls a **Netlify serverless function** (`netlify/functions/churches.js`) hosted on your own Netlify site.
+Rather than calling Airtable directly from the browser, the website calls a **Netlify serverless function** (`netlify/functions/churches.mjs`) hosted on your own Netlify site.
 
 ```
 Visitor's browser
@@ -95,7 +100,7 @@ The Airtable token is stored as a **Netlify environment variable** — it exists
 - **Add a new church** → add a row to the Churches table
 - **Update a service time** → edit the row in the Services table
 - **Remove a church** → delete its row from both tables
-- **Add a new service** → add a row to the Services table with the matching `GCFA#`
+- **Add a new service** → add a row to the Services table with the matching `GCFA ID`
 
 The next time anyone visits the website, they will see the updated data. Changes are reflected **within seconds** of being saved in Airtable (subject to a 5-minute CDN cache on Netlify, which improves performance by reducing the number of calls to Airtable).
 
@@ -108,8 +113,8 @@ A text search bar filters results by church name, city, ZIP code, district, or s
 
 ### Filters
 - **Service Day** — filter by day of the week (Sunday, Saturday, Wednesday, etc.)
-- **Service Time** — filter by time of day (Morning 6am–Noon, Afternoon 12–6pm, Evening 6pm+)
-- **District** — a dropdown populated dynamically from whatever districts exist in Airtable at the time of the page load
+- **Service Time** — filter by time of day (Morning before 12pm, Afternoon 12–6pm, Evening 6pm onward)
+- **District / City / ZIP** — dropdowns populated dynamically from whatever values exist in Airtable at the time of the page load
 
 ### Three view modes
 | View | What it shows |
@@ -123,10 +128,17 @@ A text search bar filters results by church name, city, ZIP code, district, or s
 ## Deployment
 
 The site is hosted on **Netlify** (free tier is sufficient). Netlify handles:
-- Serving the HTML, CSS, and JS files
+- Serving the files in `public/` (and nothing outside it)
 - Running the serverless function that proxies Airtable requests
 - Storing the API token securely as an environment variable
 - A 5-minute CDN cache on the function response to reduce Airtable API calls
+
+### How to deploy
+The project is a git repository. The recommended setup is to push it to GitHub
+and connect the repo to Netlify (Site configuration → Build & deploy → Link
+repository) — every `git push` then deploys automatically, and nothing outside
+`public/` and `netlify/functions/` is ever uploaded. Manual deploys (drag-and-drop
+or `netlify deploy`) also work because `netlify.toml` sets `publish = "public"`.
 
 ### Environment variables required in Netlify
 Set these under **Site configuration → Environment variables**:
@@ -142,7 +154,18 @@ Set these under **Site configuration → Environment variables**:
 
 ## Local Development
 
-To run the site on your own computer (the serverless function requires a local server — you cannot just open `index.html` as a file):
+To run the site on your own computer (the serverless function requires a local server — you cannot just open `index.html` as a file), there are two options:
+
+**Option A — no installs needed (Windows):**
+
+1. Fill in your `.env` file with a valid token and base ID
+2. Run `powershell -ExecutionPolicy Bypass -File tools\dev-server.ps1` from the project folder
+3. Open `http://localhost:8888` in your browser
+
+This uses `tools/dev-server.ps1`, which serves the `public/` folder and emulates
+the serverless function by calling Airtable directly with the `.env` credentials.
+
+**Option B — the official Netlify tooling:**
 
 1. Make sure Node.js is installed
 2. Install the Netlify CLI: `npm install -g netlify-cli`
@@ -157,8 +180,7 @@ To run the site on your own computer (the serverless function requires a local s
 | Technology | Role |
 |---|---|
 | HTML / CSS / JavaScript | Frontend — no framework, no build step |
-| Poppins (Google Fonts) | Body text font |
-| Lora (Google Fonts) | Heading font (matches INUMC.org serif style) |
+| Poppins (Google Fonts) | All site typography |
 | Airtable | Data backend — stores all church and service records |
 | Airtable REST API | How the serverless function reads data |
 | Netlify Functions | Serverless proxy — keeps the API token secure |
@@ -169,10 +191,22 @@ To run the site on your own computer (the serverless function requires a local s
 
 ## Contact for Data Updates
 
-To report inaccuracies in the directory: **communications@inumc.org**
+To report inaccuracies in the directory: **in.comm@inumc.org**
 
 To update church or service records: log into Airtable and edit the Churches or Services table directly.
 
 ---
 
-*Last updated: March 2026*
+## Troubleshooting
+
+If the directory loads but shows no churches:
+
+1. Open `https://<your-site>/.netlify/functions/churches?debug=1` in a browser.
+   The `_debug` section lists the exact column names Airtable is returning.
+2. Confirm both tables still have a `GCFA ID` column and that the values match
+   between the two tables.
+3. Check the Netlify function logs (Site → Logs → Functions) for Airtable errors.
+
+---
+
+*Last updated: June 2026*

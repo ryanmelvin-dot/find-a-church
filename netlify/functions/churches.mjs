@@ -1,11 +1,13 @@
 /**
- * Netlify serverless function — Airtable proxy
+ * Netlify serverless function — Airtable proxy (Functions 2.0 syntax)
  *
  * The Airtable token is stored as a Netlify environment variable (AIRTABLE_TOKEN).
  * It is NEVER sent to the browser. The browser calls this function instead of
  * calling Airtable directly.
  *
  * Endpoint: GET /.netlify/functions/churches
+ *   Append ?debug=1 to include table field names in the response
+ *   (useful when diagnosing Airtable column renames).
  */
 
 const BASE_ID        = process.env.AIRTABLE_BASE_ID;
@@ -39,19 +41,16 @@ async function fetchTable(tableName) {
   return records;
 }
 
-exports.handler = async function (event) {
+export default async function handler(req) {
   // Only allow GET requests
-  if (event.httpMethod !== "GET") {
-    return { statusCode: 405, body: "Method Not Allowed" };
+  if (req.method !== "GET") {
+    return new Response("Method Not Allowed", { status: 405 });
   }
 
   // Guard: environment variables must be configured
   if (!BASE_ID || !TOKEN) {
     console.error("Missing AIRTABLE_BASE_ID or AIRTABLE_TOKEN environment variables.");
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Server configuration error." }),
-    };
+    return Response.json({ error: "Server configuration error." }, { status: 500 });
   }
 
   try {
@@ -63,34 +62,32 @@ exports.handler = async function (event) {
     // Log counts server-side (visible in Netlify function logs)
     console.log(`Fetched ${churchRecords.length} church records and ${serviceRecords.length} service records.`);
 
-    // Include field names from the first record of each table so the client
-    // can detect mismatches between what the code expects and what Airtable has.
-    const churchFields  = churchRecords.length  ? Object.keys(churchRecords[0].fields)  : [];
-    const serviceFields = serviceRecords.length ? Object.keys(serviceRecords[0].fields) : [];
-
-    return {
-      statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-        // Cache for 5 minutes on Netlify's CDN — reduces Airtable API calls
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
-      },
-      body: JSON.stringify({
-        churches: churchRecords,
-        services: serviceRecords,
-        _debug: {
-          churchCount:  churchRecords.length,
-          serviceCount: serviceRecords.length,
-          churchFields,
-          serviceFields,
-        },
-      }),
+    const payload = {
+      churches: churchRecords,
+      services: serviceRecords,
     };
+
+    // Schema diagnostics are opt-in (?debug=1) so field names aren't
+    // advertised to every caller of this public endpoint.
+    if (new URL(req.url).searchParams.get("debug") === "1") {
+      payload._debug = {
+        churchCount:   churchRecords.length,
+        serviceCount:  serviceRecords.length,
+        churchFields:  churchRecords.length  ? Object.keys(churchRecords[0].fields)  : [],
+        serviceFields: serviceRecords.length ? Object.keys(serviceRecords[0].fields) : [],
+      };
+    }
+
+    return Response.json(payload, {
+      headers: {
+        // Browsers always revalidate; Netlify's CDN serves a shared copy for
+        // 5 minutes — keeps traffic off Airtable's 5 req/sec rate limit.
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Netlify-CDN-Cache-Control": "public, s-maxage=300, stale-while-revalidate=60",
+      },
+    });
   } catch (err) {
     console.error(err);
-    return {
-      statusCode: 502,
-      body: JSON.stringify({ error: "Failed to fetch data from Airtable." }),
-    };
+    return Response.json({ error: "Failed to fetch data from Airtable." }, { status: 502 });
   }
-};
+}

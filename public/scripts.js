@@ -6,10 +6,14 @@
 // To run locally: install the Netlify CLI (npm i -g netlify-cli)
 // then run `netlify dev` instead of opening index.html directly.
 //
-// Proxy endpoint (defined in netlify/functions/churches.js):
-const DATA_URL = "/.netlify/functions/churches";
+// Proxy endpoint (defined in netlify/functions/churches.mjs):
+// On localhost (netlify dev) we request ?debug=1 so the function includes
+// field-name diagnostics in the response.
+const DATA_URL = "/.netlify/functions/churches"
+  + (["localhost", "127.0.0.1"].includes(location.hostname) ? "?debug=1" : "");
 
-// Field name map — update if your Airtable column names differ.
+// Field name map — must match the Airtable column names (exactly, or fuzzily
+// per normalizeKey below). Both tables join on the "GCFA ID" column.
 const CHURCH_FIELDS = {
   gcfa:     "GCFA ID",
   name:     "Account Name",
@@ -62,7 +66,9 @@ async function fetchData() {
 
 // ─── Fuzzy field lookup ───────────────────────────────────────────────────
 // Strips all non-alphanumeric characters and lowercases before comparing,
-// so "GCFA#", "gcfa#", "GCFA", "gcfa", "Gcfa #" all resolve to the same field.
+// so "GCFA ID", "gcfa id", and "GCFA-ID" all resolve to the same field.
+// Caution: this only forgives punctuation/case — "GCFA#" would NOT match
+// "GCFA ID", because the letters themselves differ once symbols are removed.
 function normalizeKey(k) {
   return String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -90,6 +96,11 @@ function cleanDistrict(district) {
 
 // ─── Map Airtable records → plain objects ─────────────────────────────────
 function normalizeChurches(records) {
+  // Dedupe guard: if the Churches table accidentally contains two rows with
+  // the same GCFA ID, keep the first — otherwise the join would duplicate
+  // every one of that church's services.
+  const seenGcfa = new Set();
+
   return records.map((r) => {
     const f = r.fields;
 
@@ -119,7 +130,11 @@ function normalizeChurches(records) {
       website:  getField(f, CHURCH_FIELDS.website),
       photo,
     };
-  }).filter((c) => c.gcfa);
+  }).filter((c) => {
+    if (!c.gcfa || seenGcfa.has(c.gcfa)) return false;
+    seenGcfa.add(c.gcfa);
+    return true;
+  });
 }
 
 function normalizeServices(records) {
@@ -204,6 +219,10 @@ async function init() {
   const yearEl = document.getElementById("year");
   if (yearEl) yearEl.textContent = new Date().getFullYear();
 
+  // Wire all controls up-front so the filters, view toggle, and modal close
+  // still respond even if the data fetch fails.
+  wireControls();
+
   const loadingState = document.getElementById("loadingState");
   const emptyState   = document.getElementById("emptyState");
 
@@ -270,12 +289,14 @@ async function init() {
       if (h2) h2.textContent = "Could not load church data";
       if (p)  p.textContent  = "There was a problem reaching the data server. Check the browser console (F12) for details.";
     }
-    return;
   } finally {
     if (loadingState) loadingState.setAttribute("hidden", "");
   }
+}
 
-  // ── Wire up filters ────────────────────────────────────────────────────
+// ─── Wire up filters, modal, and view toggle ───────────────────────────────
+function wireControls() {
+  // ── Filters ────────────────────────────────────────────────────────────
   const triggerFilter = () => {
     currentPage  = 1;           // always jump back to page 1 on any filter change
     filteredRows = applyFilters(allRows);
@@ -298,6 +319,7 @@ async function init() {
     });
     const sort = document.getElementById("sortSelect");
     if (sort) sort.value = "name-asc";
+    currentPage  = 1;
     filteredRows = applyFilters(allRows);
     renderResults(filteredRows);
   });
@@ -306,6 +328,24 @@ async function init() {
   document.getElementById("modalClose")   ?.addEventListener("click",   closeChurchModal);
   document.getElementById("modalBackdrop")?.addEventListener("click",   closeChurchModal);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeChurchModal(); });
+
+  // ── Modal focus trap — keep Tab cycling inside the open dialog ────────
+  document.getElementById("churchModal")?.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const focusables = e.currentTarget.querySelectorAll(
+      'button, a[href], [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last  = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
 
   // ── View toggle ────────────────────────────────────────────────────────
   ["cards", "list", "map"].forEach((view) => {
@@ -362,19 +402,23 @@ function populateDynamicFilters(rows) {
 }
 
 // ─── Filters ──────────────────────────────────────────────────────────────
+// Forgiving parser for hand-entered Airtable times: accepts "9:00 AM",
+// "9 AM", "9:00AM", "10:30 a.m.", and 24-hour values like "14:00".
+// Buckets: morning = before noon, afternoon = 12pm–5:59pm, evening = 6pm on.
 function parseTimeToBucket(timeStr) {
   if (!timeStr) return "";
-  const match = timeStr.trim().toUpperCase().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  const cleaned = String(timeStr).toUpperCase().replace(/\./g, "").trim();
+  const match   = cleaned.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/);
   if (!match) return "";
 
   let hour = parseInt(match[1], 10);
+  if (hour > 23) return "";
   if (match[3] === "PM" && hour !== 12) hour += 12;
   if (match[3] === "AM" && hour === 12) hour  = 0;
 
-  if (hour >= 6  && hour < 12) return "morning";
-  if (hour >= 12 && hour < 18) return "afternoon";
-  if (hour >= 18)              return "evening";
-  return "";
+  if (hour < 12) return "morning";
+  if (hour < 18) return "afternoon";
+  return "evening";
 }
 
 function applyFilters(rows) {
@@ -627,10 +671,20 @@ function renderCardView(churches, container) {
         </div>
       </div>`;
 
-    // Click anywhere on the card (except links) opens the detail modal
+    // Card is clickable and keyboard-operable — click, Enter, or Space
+    // (anywhere except links) opens the detail modal.
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.setAttribute("aria-label", `${church.accountName || "Church"} — view details`);
     card.addEventListener("click", (e) => {
       if (e.target.closest("a")) return;
-      openChurchModal(church);
+      openChurchModal(church, card);
+    });
+    card.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target.closest("a")) return;
+      e.preventDefault();
+      openChurchModal(church, card);
     });
 
     container.appendChild(card);
@@ -746,7 +800,7 @@ function renderMapView(churches, container) {
     const address = [church.street, church.city, church.state, church.zip]
       .filter(Boolean).join(", ");
 
-    item.addEventListener("click", () => {
+    const selectChurch = () => {
       listDiv.querySelectorAll(".map-item.is-active")
         .forEach((el) => el.classList.remove("is-active"));
       item.classList.add("is-active");
@@ -776,6 +830,14 @@ function renderMapView(churches, container) {
             Get Directions →
           </a>
         </div>`;
+    };
+
+    // Clickable and keyboard-operable (Enter or Space)
+    item.addEventListener("click", selectChurch);
+    item.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      selectChurch();
     });
 
     listDiv.appendChild(item);
@@ -789,6 +851,9 @@ function renderMapView(churches, container) {
 function buildMapSidebarItem(church, number) {
   const item = document.createElement("div");
   item.className = "map-item";
+  item.tabIndex  = 0;
+  item.setAttribute("role", "button");
+  item.setAttribute("aria-label", `${church.accountName || "Church"} — show on map`);
 
   const cityLine = [church.city, church.state, church.zip].filter(Boolean).join(", ");
   const addrLine = [church.street, cityLine].filter(Boolean).join(", ");
@@ -815,10 +880,15 @@ function buildMapSidebarItem(church, number) {
 }
 
 // ─── Church detail modal ──────────────────────────────────────────────────
-function openChurchModal(church) {
+// Element that opened the modal — focus returns to it on close.
+let lastModalTrigger = null;
+
+function openChurchModal(church, triggerEl = null) {
   const overlay = document.getElementById("churchModal");
   const content = document.getElementById("modalContent");
   if (!overlay || !content) return;
+
+  lastModalTrigger = triggerEl || document.activeElement;
 
   const cityLine = [church.city, church.state, church.zip].filter(Boolean).join(", ");
   const fullAddr = [church.street, cityLine].filter(Boolean).join(", ");
@@ -905,8 +975,14 @@ function openChurchModal(church) {
 
 function closeChurchModal() {
   const overlay = document.getElementById("churchModal");
-  if (overlay) overlay.setAttribute("hidden", "");
+  if (!overlay || overlay.hasAttribute("hidden")) return;
+  overlay.setAttribute("hidden", "");
   document.body.style.overflow = "";
+  // Return focus to the card that opened the modal
+  if (lastModalTrigger && document.contains(lastModalTrigger)) {
+    lastModalTrigger.focus();
+  }
+  lastModalTrigger = null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

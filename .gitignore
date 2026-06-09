@@ -13,7 +13,7 @@ desktop.ini
 # Netlify local dev cache
 .netlify/
 
-# Generated files from the CSV-to-JSON helper script
+# Design-scrape reference artifacts (kept locally, never committed or deployed)
 inumc_design_info.json
 inumc_homepage_full.png
 inumc_homepage_viewport.png

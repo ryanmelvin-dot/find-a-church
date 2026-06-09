@@ -2,5 +2,18 @@
 # Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
 
 [build]
-  publish   = "."
+  # Only the public/ folder is deployed — secrets (.env) and internal docs
+  # in the project root can never be published.
+  publish   = "public"
   functions = "netlify/functions"
+
+# Security headers for all static responses
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    # frame-src allows the Google Maps embeds; frame-ancestors lets INUMC.org
+    # embed this directory in an iframe while blocking everyone else.
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; frame-src https://maps.google.com https://www.google.com; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self' https://inumc.org https://*.inumc.org"
