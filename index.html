@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Find an Indiana United Methodist Church Near You</title>
+    <meta name="description" content="Search the Indiana Conference of The United Methodist Church directory to find worship services, times, and locations near you." />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script src="scripts.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="brand">
+          <img class="brand-mark" src="assets/logomark.png" alt="Indiana Conference" />
+          <div class="brand-text">
+            <span class="brand-kicker">Indiana Conference</span>
+            <span class="brand-title">Find a Church</span>
+          </div>
+        </div>
+        <nav class="top-nav">
+          <a href="#" class="nav-link is-active">Find a Church</a>
+          <a href="https://www.inumc.org/" class="nav-link" target="_blank" rel="noopener noreferrer">INUMC.org</a>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Full-width dark hero sits OUTSIDE .page so it bleeds edge-to-edge -->
+    <section class="hero">
+      <div class="hero-inner">
+        <div class="hero-eyebrow" aria-hidden="true"></div>
+        <h1>Find an <span class="hero-accent">Indiana United Methodist Church</span> Near You</h1>
+        <p>
+          Are you looking for a United Methodist Church in Indiana? Use the filters below to
+          explore churches and worship services across the state.
+        </p>
+      </div>
+    </section>
+
+    <main class="page">
+      <section class="search-panel" aria-label="Search and filter churches">
+        <div class="search-row">
+          <div class="field">
+            <label for="searchInput">Search</label>
+            <div class="field-with-icon">
+              <span class="icon icon-search" aria-hidden="true"></span>
+              <input
+                id="searchInput"
+                type="text"
+                placeholder="Church name, city, ZIP, district..."
+                autocomplete="off"
+              />
+            </div>
+          </div>
+          <div class="field">
+            <label for="dayFilter">Service day</label>
+            <select id="dayFilter">
+              <option value="">Any day</option>
+              <option value="Sunday">Sunday</option>
+              <option value="Monday">Monday</option>
+              <option value="Tuesday">Tuesday</option>
+              <option value="Wednesday">Wednesday</option>
+              <option value="Thursday">Thursday</option>
+              <option value="Friday">Friday</option>
+              <option value="Saturday">Saturday</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="timeFilter">Service time</label>
+            <select id="timeFilter">
+              <option value="">Any time</option>
+              <option value="morning">Morning (6am–11:59am)</option>
+              <option value="afternoon">Afternoon (12pm–5:59pm)</option>
+              <option value="evening">Evening (6pm–11:59pm)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="districtFilter">District</label>
+            <select id="districtFilter">
+              <option value="">All districts</option>
+            </select>
+          </div>
+        </div>
+        <div class="search-row search-row-location">
+          <div class="field">
+            <label for="cityFilter">City</label>
+            <select id="cityFilter">
+              <option value="">All cities</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="zipFilter">ZIP code</label>
+            <select id="zipFilter">
+              <option value="">All ZIP codes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sortSelect">Sort</label>
+            <select id="sortSelect">
+              <option value="name-asc">A–Z Name</option>
+              <option value="name-desc">Z–A Name</option>
+            </select>
+          </div>
+        </div>
+        <div class="search-row search-row-secondary">
+          <div class="search-row-secondary-left">
+            <button id="clearFilters" class="btn-secondary">Clear filters</button>
+            <span id="resultCount" class="result-count" aria-live="polite"></span>
+          </div>
+          <div class="view-toggle" role="group" aria-label="View mode">
+            <div class="view-toggle-slider" id="viewToggleSlider" aria-hidden="true"></div>
+            <button class="view-btn is-active" data-view="cards" id="viewCardsBtn">Cards</button>
+            <button class="view-btn" data-view="list" id="viewListBtn">List</button>
+            <button class="view-btn" data-view="map" id="viewMapBtn">Map</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="results-section" aria-label="Church directory results">
+        <div id="resultsContainer" class="cards"></div>
+        <div id="paginationBar" class="pagination-bar" hidden></div>
+        <div id="emptyState" class="empty-state" hidden>
+          <h2>No results found</h2>
+          <p>Try adjusting your search or clearing the filters.</p>
+        </div>
+        <div id="loadingState" class="empty-state">
+          <div class="loading-spinner" aria-hidden="true"></div>
+          <h2>Loading directory…</h2>
+          <p>Fetching church and service data from Airtable.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <p>
+          &copy; <span id="year"></span>
+          Indiana Conference of The United Methodist Church
+        </p>
+        <p class="footer-note">
+          Data sourced from conference records. Need to request an update to church information, contact
+          <a href="mailto:in.comm@inumc.org" class="footer-link">in.comm@inumc.org</a>
+        </p>
+      </div>
+    </footer>
+    <!-- ─── Church detail modal ──────────────────────────────────────── -->
+    <div id="churchModal" class="modal-overlay" hidden>
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalChurchName">
+        <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+        <div id="modalContent" class="modal-content"></div>
+      </div>
+    </div>
+  </body>
+</html>

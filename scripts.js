@@ -1,0 +1,946 @@
+// ─── Data source ───────────────────────────────────────────────────────────
+// The browser fetches data from a secure Netlify serverless function.
+// The Airtable token lives ONLY in Netlify's environment variables — it is
+// never sent to the browser.
+//
+// To run locally: install the Netlify CLI (npm i -g netlify-cli)
+// then run `netlify dev` instead of opening index.html directly.
+//
+// Proxy endpoint (defined in netlify/functions/churches.js):
+const DATA_URL = "/.netlify/functions/churches";
+
+// Field name map — update if your Airtable column names differ.
+const CHURCH_FIELDS = {
+  gcfa:     "GCFA ID",
+  name:     "Account Name",
+  district: "District",
+  phone:    "Phone",
+  email:    "Primary Email",
+  street:   "Physical Address (Street)",
+  city:     "Physical Address (City)",
+  state:    "Physical Address (State/Province)",
+  zip:      "Physical Address (ZIP/Postal Code)",
+  website:  "Website",
+  // Note: the photo/attachment field is auto-detected in normalizeChurches,
+  // so no field name constant is needed here.
+};
+
+const SERVICE_FIELDS = {
+  gcfa:            "GCFA ID",
+  serviceName:     "Service Name",
+  serviceTimeName: "Service Time Name",
+  serviceTime:     "Service Time",
+  serviceDay:      "Service Day",
+  serviceType:     "Service Type",
+};
+
+// ─── Core state ────────────────────────────────────────────────────────────
+let allRows      = [];
+let filteredRows = [];
+let currentView  = "cards";
+
+// Pagination (card view only)
+let currentPage = 1;
+let pageSize    = 25;
+
+// Currently selected church in map view (used to highlight sidebar item)
+let mapSelectedIndex = -1;
+
+// ─── Fetch from secure proxy ───────────────────────────────────────────────
+// Calls the Netlify serverless function which holds the Airtable token
+// server-side. Returns { churches: [...records], services: [...records] }.
+async function fetchData() {
+  const response = await fetch(DATA_URL);
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Proxy error ${response.status}: ${body}`);
+  }
+
+  return response.json();
+}
+
+// ─── Fuzzy field lookup ───────────────────────────────────────────────────
+// Strips all non-alphanumeric characters and lowercases before comparing,
+// so "GCFA#", "gcfa#", "GCFA", "gcfa", "Gcfa #" all resolve to the same field.
+function normalizeKey(k) {
+  return String(k).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getField(fields, fieldName) {
+  // 1. Exact match (fastest path)
+  if (fieldName in fields) return String(fields[fieldName] || "").trim();
+  // 2. Fuzzy match — ignore case and non-alphanumeric characters
+  const target = normalizeKey(fieldName);
+  for (const key of Object.keys(fields)) {
+    if (normalizeKey(key) === target) return String(fields[key] || "").trim();
+  }
+  return "";
+}
+
+// ─── Strip trailing " District UMC" (or " UMC") from district display names ─
+// This cleans the label without touching the source data in Airtable.
+function cleanDistrict(district) {
+  return (district || "")
+    .replace(/\s+District\s+UMC\s*$/i, "")  // "X District UMC" → "X"
+    .replace(/\s+District\s*$/i, "")          // "X District"     → "X"
+    .replace(/\s+UMC\s*$/i, "")              // "X UMC"          → "X"
+    .trim();
+}
+
+// ─── Map Airtable records → plain objects ─────────────────────────────────
+function normalizeChurches(records) {
+  return records.map((r) => {
+    const f = r.fields;
+
+    // Auto-detect the attachment field: scan all values for an array whose
+    // first element has a `url` string — works regardless of column name.
+    let firstAttach = null;
+    for (const val of Object.values(f)) {
+      if (Array.isArray(val) && val.length > 0 && typeof val[0].url === "string") {
+        firstAttach = val[0];
+        break;
+      }
+    }
+    const photo = firstAttach
+      ? (firstAttach.thumbnails?.large?.url || firstAttach.url || null)
+      : null;
+
+    return {
+      gcfa:     getField(f, CHURCH_FIELDS.gcfa),
+      name:     getField(f, CHURCH_FIELDS.name),
+      district: cleanDistrict(getField(f, CHURCH_FIELDS.district)),
+      phone:    getField(f, CHURCH_FIELDS.phone),
+      email:    getField(f, CHURCH_FIELDS.email),
+      street:   getField(f, CHURCH_FIELDS.street),
+      city:     getField(f, CHURCH_FIELDS.city),
+      state:    getField(f, CHURCH_FIELDS.state),
+      zip:      getField(f, CHURCH_FIELDS.zip),
+      website:  getField(f, CHURCH_FIELDS.website),
+      photo,
+    };
+  }).filter((c) => c.gcfa);
+}
+
+function normalizeServices(records) {
+  return records.map((r) => {
+    const f = r.fields;
+    return {
+      gcfa:            getField(f, SERVICE_FIELDS.gcfa),
+      serviceName:     getField(f, SERVICE_FIELDS.serviceName),
+      serviceTimeName: getField(f, SERVICE_FIELDS.serviceTimeName),
+      serviceTime:     getField(f, SERVICE_FIELDS.serviceTime),
+      serviceDay:      getField(f, SERVICE_FIELDS.serviceDay),
+      serviceType:     getField(f, SERVICE_FIELDS.serviceType),
+    };
+  }).filter((s) => s.gcfa);
+}
+
+// ─── Join churches + services on GCFA ID (left join) ─────────────────────
+// Every church appears at least once. Churches with no services get one row
+// with empty service fields so they still show in all views.
+function joinData(churches, services) {
+  // Build a map of gcfa → [services]
+  const servicesByGcfa = {};
+  services.forEach((svc) => {
+    const key = svc.gcfa;
+    if (!servicesByGcfa[key]) servicesByGcfa[key] = [];
+    servicesByGcfa[key].push(svc);
+  });
+
+  const rows = [];
+  churches.forEach((church) => {
+    const churchServices = servicesByGcfa[church.gcfa] || [];
+
+    if (churchServices.length === 0) {
+      // Church exists but has no services — include with blank service fields
+      rows.push({
+        gcfa:            church.gcfa,
+        accountName:     church.name,
+        district:        church.district,
+        phone:           church.phone,
+        email:           church.email,
+        street:          church.street,
+        city:            church.city,
+        state:           church.state,
+        zip:             church.zip,
+        website:         church.website,
+        photo:           church.photo || null,
+        serviceName:     "",
+        serviceTimeName: "",
+        serviceDay:      "",
+        serviceTime:     "",
+        serviceType:     "",
+      });
+    } else {
+      churchServices.forEach((svc) => {
+        rows.push({
+          gcfa:            church.gcfa,
+          accountName:     church.name,
+          district:        church.district,
+          phone:           church.phone,
+          email:           church.email,
+          street:          church.street,
+          city:            church.city,
+          state:           church.state,
+          zip:             church.zip,
+          website:         church.website,
+          photo:           church.photo || null,
+          serviceName:     svc.serviceName     || "",
+          serviceTimeName: svc.serviceTimeName || "",
+          serviceDay:      svc.serviceDay      || "",
+          serviceTime:     svc.serviceTime     || "",
+          serviceType:     svc.serviceType     || "",
+        });
+      });
+    }
+  });
+  return rows;
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+async function init() {
+  // Footer year
+  const yearEl = document.getElementById("year");
+  if (yearEl) yearEl.textContent = new Date().getFullYear();
+
+  const loadingState = document.getElementById("loadingState");
+  const emptyState   = document.getElementById("emptyState");
+
+  // Show loading
+  if (loadingState) loadingState.removeAttribute("hidden");
+  if (emptyState)   emptyState.setAttribute("hidden", "");
+
+  try {
+    // Single call to the secure server-side proxy
+    const payload = await fetchData();
+    const { churches: churchRecords, services: serviceRecords, _debug } = payload;
+
+    // ── Diagnostics (always visible in browser DevTools → Console) ──────────
+    if (_debug) {
+      console.group("📋 Find a Church — data diagnostics");
+      console.log(`Church records fetched from Airtable : ${_debug.churchCount}`);
+      console.log(`Service records fetched from Airtable: ${_debug.serviceCount}`);
+      if (_debug.churchFields.length) {
+        console.log("Church table field names   :", _debug.churchFields.join(", "));
+        console.log("Code expects GCFA field    :", CHURCH_FIELDS.gcfa);
+        const gcfaMatch = _debug.churchFields.some(k => normalizeKey(k) === normalizeKey(CHURCH_FIELDS.gcfa));
+        console.log(`GCFA# fuzzy match (Churches): ${gcfaMatch ? "✅ YES" : "❌ NO — no field resembles GCFA in the Churches table"}`);
+      } else {
+        console.warn("⚠️  Churches table appears to be empty.");
+      }
+      if (_debug.serviceFields.length) {
+        console.log("Service table field names  :", _debug.serviceFields.join(", "));
+        const gcfaMatch = _debug.serviceFields.some(k => normalizeKey(k) === normalizeKey(SERVICE_FIELDS.gcfa));
+        console.log(`GCFA# fuzzy match (Services): ${gcfaMatch ? "✅ YES" : "❌ NO — no field resembles GCFA in the Services table"}`);
+      } else {
+        console.warn("⚠️  Services table appears to be empty.");
+      }
+      console.groupEnd();
+    }
+
+    const churches = normalizeChurches(churchRecords);
+    const services = normalizeServices(serviceRecords);
+
+    allRows = joinData(churches, services);
+
+    console.log(`Churches with valid GCFA# : ${churches.length}`);
+    console.log(`Services  with valid GCFA# : ${services.length}`);
+    console.log(`Joined rows (church + service match): ${allRows.length}`);
+
+    if (allRows.length === 0 && (churches.length > 0 || services.length > 0)) {
+      console.warn(
+        "⚠️  Records were fetched but none joined. " +
+        "Check that GCFA# values in the Churches table match GCFA# values in the Services table."
+      );
+    }
+
+    // Populate all dynamic dropdowns from live data
+    populateDynamicFilters(allRows);
+
+    filteredRows = applyFilters(allRows);
+    renderResults(filteredRows);
+  } catch (err) {
+    console.error("Find a Church fetch error:", err);
+    if (loadingState) loadingState.setAttribute("hidden", "");
+    if (emptyState) {
+      emptyState.removeAttribute("hidden");
+      const h2 = emptyState.querySelector("h2");
+      const p  = emptyState.querySelector("p");
+      if (h2) h2.textContent = "Could not load church data";
+      if (p)  p.textContent  = "There was a problem reaching the data server. Check the browser console (F12) for details.";
+    }
+    return;
+  } finally {
+    if (loadingState) loadingState.setAttribute("hidden", "");
+  }
+
+  // ── Wire up filters ────────────────────────────────────────────────────
+  const triggerFilter = () => {
+    currentPage  = 1;           // always jump back to page 1 on any filter change
+    filteredRows = applyFilters(allRows);
+    renderResults(filteredRows);
+  };
+
+  document.getElementById("searchInput")   ?.addEventListener("input",  triggerFilter);
+  document.getElementById("dayFilter")     ?.addEventListener("change", triggerFilter);
+  document.getElementById("timeFilter")    ?.addEventListener("change", triggerFilter);
+  document.getElementById("districtFilter")?.addEventListener("change", triggerFilter);
+  document.getElementById("cityFilter")    ?.addEventListener("change", triggerFilter);
+  document.getElementById("zipFilter")     ?.addEventListener("change", triggerFilter);
+  document.getElementById("sortSelect")    ?.addEventListener("change", triggerFilter);
+
+  document.getElementById("clearFilters")?.addEventListener("click", () => {
+    ["searchInput", "dayFilter", "timeFilter", "districtFilter",
+     "cityFilter", "zipFilter"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+    const sort = document.getElementById("sortSelect");
+    if (sort) sort.value = "name-asc";
+    filteredRows = applyFilters(allRows);
+    renderResults(filteredRows);
+  });
+
+  // ── Modal close ────────────────────────────────────────────────────────
+  document.getElementById("modalClose")   ?.addEventListener("click",   closeChurchModal);
+  document.getElementById("modalBackdrop")?.addEventListener("click",   closeChurchModal);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeChurchModal(); });
+
+  // ── View toggle ────────────────────────────────────────────────────────
+  ["cards", "list", "map"].forEach((view) => {
+    document.getElementById(`view${capitalize(view)}Btn`)
+      ?.addEventListener("click", () => {
+        currentView = view;
+        updateViewToggle();
+        renderResults(filteredRows);
+      });
+  });
+
+  updateViewToggle();
+
+  // Set initial slider position without animation so it doesn't fly in from 0.
+  const _slider = document.getElementById("viewToggleSlider");
+  if (_slider) {
+    _slider.style.transition = "none";
+    moveViewToggleSlider();
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => { _slider.style.transition = ""; })
+    );
+  }
+}
+
+// ─── Populate dynamic filter dropdowns from live data ─────────────────────
+function populateDynamicFilters(rows) {
+  function fill(id, values) {
+    const select = document.getElementById(id);
+    if (!select) return;
+    const sorted = [...new Set(values.filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+    sorted.forEach((v) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = v;
+      select.appendChild(opt);
+    });
+  }
+
+  fill("districtFilter", rows.map((r) => r.district));
+  fill("cityFilter",     rows.map((r) => r.city));
+  // ZIP codes sorted numerically
+  const zips = [...new Set(rows.map((r) => r.zip).filter(Boolean))].sort();
+  const zipSelect = document.getElementById("zipFilter");
+  if (zipSelect) {
+    zips.forEach((z) => {
+      const opt = document.createElement("option");
+      opt.value = z;
+      opt.textContent = z;
+      zipSelect.appendChild(opt);
+    });
+  }
+}
+
+// ─── Filters ──────────────────────────────────────────────────────────────
+function parseTimeToBucket(timeStr) {
+  if (!timeStr) return "";
+  const match = timeStr.trim().toUpperCase().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (!match) return "";
+
+  let hour = parseInt(match[1], 10);
+  if (match[3] === "PM" && hour !== 12) hour += 12;
+  if (match[3] === "AM" && hour === 12) hour  = 0;
+
+  if (hour >= 6  && hour < 12) return "morning";
+  if (hour >= 12 && hour < 18) return "afternoon";
+  if (hour >= 18)              return "evening";
+  return "";
+}
+
+function applyFilters(rows) {
+  const query      = (document.getElementById("searchInput")   ?.value || "").toLowerCase();
+  const day        = (document.getElementById("dayFilter")     ?.value || "").toLowerCase();
+  const timeBucket =  document.getElementById("timeFilter")    ?.value || "";
+  const district   = (document.getElementById("districtFilter")?.value || "").toLowerCase();
+  const city       = (document.getElementById("cityFilter")    ?.value || "").toLowerCase();
+  const zip        =  document.getElementById("zipFilter")     ?.value || "";
+  const sortVal    =  document.getElementById("sortSelect")    ?.value || "name-asc";
+
+  const filtered = rows.filter((row) => {
+    if (query) {
+      const hay = [row.accountName, row.city, row.state, row.zip,
+                   row.district, row.serviceName, row.serviceTimeName, row.street]
+        .join(" ").toLowerCase();
+      if (!hay.includes(query)) return false;
+    }
+
+    if (day && (row.serviceDay || "").toLowerCase() !== day) return false;
+
+    if (timeBucket && parseTimeToBucket(row.serviceTime) !== timeBucket) return false;
+
+    if (district && (row.district || "").toLowerCase() !== district) return false;
+
+    if (city && (row.city || "").toLowerCase() !== city) return false;
+    if (zip  && (row.zip  || "") !== zip)                return false;
+
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const cmp = (a.accountName || "").localeCompare(b.accountName || "", undefined, { sensitivity: "base" });
+    return sortVal === "name-desc" ? -cmp : cmp;
+  });
+
+  return filtered;
+}
+
+// ─── Group rows by church ─────────────────────────────────────────────────
+// Returns an array of church objects, each with a `services` array.
+// Preserves the filter order so sorted/filtered results stay consistent.
+function groupByChurch(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = row.gcfa || row.accountName;
+    if (!map.has(key)) {
+      map.set(key, {
+        gcfa:        row.gcfa,
+        accountName: row.accountName,
+        district:    row.district,
+        phone:       row.phone,
+        email:       row.email,
+        street:      row.street,
+        city:        row.city,
+        state:       row.state,
+        zip:         row.zip,
+        website:     row.website,
+        photo:       row.photo || null,
+        services:    [],
+      });
+    }
+    map.get(key).services.push({
+      serviceName:     row.serviceName,
+      serviceTimeName: row.serviceTimeName,
+      serviceDay:      row.serviceDay,
+      serviceTime:     row.serviceTime,
+      serviceType:     row.serviceType,
+    });
+  });
+  return [...map.values()];
+}
+
+// ─── Render dispatcher ────────────────────────────────────────────────────
+function renderResults(rows) {
+  const container  = document.getElementById("resultsContainer");
+  const emptyState = document.getElementById("emptyState");
+  const countEl    = document.getElementById("resultCount");
+
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  if (!rows || rows.length === 0) {
+    container.className = "results-container";
+    if (emptyState) {
+      const h2 = emptyState.querySelector("h2");
+      const p  = emptyState.querySelector("p");
+      if (allRows.length === 0) {
+        if (h2) h2.textContent = "No churches found";
+        if (p)  p.textContent  = "The directory is empty or the data could not be matched. Open browser DevTools (F12) → Console for a detailed diagnostic.";
+      } else {
+        if (h2) h2.textContent = "No results found";
+        if (p)  p.textContent  = "Try adjusting your search or clearing the filters.";
+      }
+      emptyState.removeAttribute("hidden");
+    }
+    if (countEl) countEl.textContent = "";
+    return;
+  }
+
+  if (emptyState) emptyState.setAttribute("hidden", "");
+
+  const pagBar = document.getElementById("paginationBar");
+
+  if (currentView === "list") {
+    container.className = "results-container";
+    if (pagBar) pagBar.hidden = true;
+    const listChurches = groupByChurch(rows);
+    if (countEl) countEl.textContent = `${listChurches.length.toLocaleString()} ${listChurches.length === 1 ? "church" : "churches"}`;
+    renderListView(listChurches, container);
+  } else if (currentView === "map") {
+    container.className = "results-container";
+    if (pagBar) pagBar.hidden = true;
+    const churches = groupByChurch(rows);
+    if (countEl) countEl.textContent = `${churches.length.toLocaleString()} ${churches.length === 1 ? "church" : "churches"}`;
+    renderMapView(churches, container);
+  } else {
+    container.className = "cards";
+    const allChurches = groupByChurch(rows);
+    const total       = allChurches.length;
+    const start       = (currentPage - 1) * pageSize;
+    const paged       = allChurches.slice(start, start + pageSize);
+    if (countEl) countEl.textContent = `${total.toLocaleString()} ${total === 1 ? "church" : "churches"}`;
+    renderCardView(paged, container);
+    renderPagination(total);
+  }
+}
+
+// ─── Pagination ───────────────────────────────────────────────────────────
+function getPageNumbers(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  if (current <= 4)         return [1, 2, 3, 4, 5, "…", total];
+  if (current >= total - 3) return [1, "…", total - 4, total - 3, total - 2, total - 1, total];
+  return [1, "…", current - 1, current, current + 1, "…", total];
+}
+
+function renderPagination(total) {
+  const bar = document.getElementById("paginationBar");
+  if (!bar) return;
+
+  const totalPages = Math.ceil(total / pageSize);
+  if (totalPages <= 1) { bar.hidden = true; return; }
+
+  bar.hidden = false;
+  const start = (currentPage - 1) * pageSize + 1;
+  const end   = Math.min(currentPage * pageSize, total);
+  const pages = getPageNumbers(currentPage, totalPages);
+
+  bar.innerHTML = `
+    <div class="pagination-info">Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${total.toLocaleString()}</div>
+    <div class="pagination-pages">
+      <button class="page-btn page-nav" id="pagePrev" ${currentPage === 1 ? "disabled" : ""}>&#8249;</button>
+      ${pages.map((p) =>
+        p === "…"
+          ? `<span class="page-ellipsis">…</span>`
+          : `<button class="page-btn ${p === currentPage ? "is-active" : ""}" data-page="${p}">${p}</button>`
+      ).join("")}
+      <button class="page-btn page-nav" id="pageNext" ${currentPage === totalPages ? "disabled" : ""}>&#8250;</button>
+    </div>
+    <div class="pagination-sizes">
+      <span class="page-size-label">Per page</span>
+      ${[25, 50, 100].map((n) =>
+        `<button class="page-size-btn ${pageSize === n ? "is-active" : ""}" data-size="${n}">${n}</button>`
+      ).join("")}
+    </div>`;
+
+  bar.querySelector("#pagePrev")?.addEventListener("click", () => {
+    if (currentPage > 1) { currentPage--; renderResults(filteredRows); paginationScrollTop(); }
+  });
+  bar.querySelector("#pageNext")?.addEventListener("click", () => {
+    if (currentPage < totalPages) { currentPage++; renderResults(filteredRows); paginationScrollTop(); }
+  });
+  bar.querySelectorAll("[data-page]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      currentPage = +btn.dataset.page;
+      renderResults(filteredRows);
+      paginationScrollTop();
+    });
+  });
+  bar.querySelectorAll("[data-size]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pageSize    = +btn.dataset.size;
+      currentPage = 1;
+      renderResults(filteredRows);
+    });
+  });
+}
+
+function paginationScrollTop() {
+  document.querySelector(".search-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ─── Card view ────────────────────────────────────────────────────────────
+function renderCardView(churches, container) {
+  churches.forEach((church) => {
+    const card     = document.createElement("article");
+    card.className = "card";
+
+    const cityLine   = [church.city, church.state, church.zip].filter(Boolean).join(", ");
+    const fullAddr   = [church.street, cityLine].filter(Boolean).join(", ");
+
+    const websiteUrl  = church.website
+      ? (!/^https?:\/\//i.test(church.website) ? "https://" + church.website : church.website)
+      : "";
+    const websiteHref = escapeHtml(encodeURI(websiteUrl));
+    const emailHref   = escapeHtml(church.email || "");
+
+    const realServices = church.services.filter(
+      (s) => s.serviceDay || s.serviceTime || s.serviceTimeName || s.serviceName
+    );
+
+    const servicesHtml = realServices.length
+      ? realServices.map((svc) => {
+          const displayName = svc.serviceTimeName || svc.serviceName || "Worship Service";
+          const meta = [svc.serviceDay, svc.serviceTime].filter(Boolean).join(" · ");
+          return `
+            <div class="service-row">
+              <span class="service-row-name">${escapeHtml(displayName)}</span>
+              <div class="service-row-chips">
+                ${meta ? `<span class="service-chip">${escapeHtml(meta)}</span>` : ""}
+              </div>
+            </div>`;
+        }).join("")
+      : `<div class="service-row"><span class="service-row-name service-row-empty">No services listed</span></div>`;
+
+    card.innerHTML = `
+      ${church.photo
+        ? `<div class="card-photo">
+             <img src="${escapeHtml(church.photo)}"
+                  alt="${escapeHtml(church.accountName || "")}"
+                  loading="lazy" />
+           </div>`
+        : ""}
+      <div class="card-body">
+        <div class="card-header">
+          <div class="card-header-text">
+            <div class="card-title">${escapeHtml(church.accountName || "Unnamed church")}</div>
+            ${fullAddr ? `<div class="card-address">${escapeHtml(fullAddr)}</div>` : ""}
+          </div>
+          ${church.district ? `<div class="district-pill">${escapeHtml(church.district)}</div>` : ""}
+        </div>
+        <div class="services-list">${servicesHtml}</div>
+        <div class="card-footer">
+          <div class="card-links">
+            ${emailHref   ? `<a class="card-link" href="mailto:${emailHref}">Email →</a>` : ""}
+            ${websiteHref ? `<a class="card-link" href="${websiteHref}" target="_blank" rel="noopener noreferrer">Website →</a>` : ""}
+            ${church.phone ? `<a class="card-link" href="tel:${escapeHtml(church.phone)}">${escapeHtml(church.phone)}</a>` : ""}
+          </div>
+        </div>
+      </div>`;
+
+    // Click anywhere on the card (except links) opens the detail modal
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("a")) return;
+      openChurchModal(church);
+    });
+
+    container.appendChild(card);
+  });
+}
+
+// ─── List view ────────────────────────────────────────────────────────────
+// Receives an array of grouped church objects (from groupByChurch).
+// One row per church; all services are listed inside the Services cell.
+function renderListView(churches, container) {
+  const wrap = document.createElement("div");
+  wrap.className = "list-wrap";
+
+  const tbodyRows = churches.map((church) => {
+    const cityLine = [church.city, church.state].filter(Boolean).join(", ");
+    const addrLine = [church.street, cityLine].filter(Boolean).join(", ");
+
+    const hasServices = church.services.some(
+      (s) => s.serviceDay || s.serviceTime || s.serviceTimeName || s.serviceName
+    );
+
+    const servicesHtml = hasServices
+      ? church.services.map((svc) => {
+          const name = svc.serviceTimeName || svc.serviceName || "";
+          const meta = [svc.serviceDay, svc.serviceTime].filter(Boolean).join(" · ");
+          return `<div class="list-service-item">
+            ${name ? `<span class="list-svc-name">${escapeHtml(name)}</span>` : ""}
+            ${meta ? `<span class="list-svc-meta">· ${escapeHtml(meta)}</span>` : ""}
+          </div>`;
+        }).join("")
+      : `<div class="list-service-none">No services listed</div>`;
+
+    const emailHref = escapeHtml(church.email || "");
+    const websiteUrl = church.website
+      ? (!/^https?:\/\//i.test(church.website) ? "https://" + church.website : church.website)
+      : "";
+    const websiteHref = escapeHtml(encodeURI(websiteUrl));
+    const contactHtml = [
+      emailHref    ? `<a class="list-email-link" href="mailto:${emailHref}">Email →</a>` : "",
+      websiteHref  ? `<a class="list-email-link" href="${websiteHref}" target="_blank" rel="noopener noreferrer">Website →</a>` : "",
+      church.phone ? `<a class="list-email-link" href="tel:${escapeHtml(church.phone)}">${escapeHtml(church.phone)}</a>` : "",
+    ].filter(Boolean).join("");
+
+    return `<tr>
+      <td>
+        <div class="list-church-cell">
+          ${church.photo
+            ? `<img class="list-thumb"
+                    src="${escapeHtml(church.photo)}"
+                    alt=""
+                    loading="lazy" />`
+            : ""}
+          <div>
+            <div class="list-church-name">${escapeHtml(church.accountName || "")}</div>
+            ${addrLine ? `<div class="list-church-addr">${escapeHtml(addrLine)}</div>` : ""}
+          </div>
+        </div>
+      </td>
+      <td>${escapeHtml(church.district || "")}</td>
+      <td><div class="list-services">${servicesHtml}</div></td>
+      <td class="list-contact">${contactHtml}</td>
+    </tr>`;
+  }).join("");
+
+  const table = document.createElement("table");
+  table.className = "list-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Church</th>
+        <th>District</th>
+        <th>Services</th>
+        <th>Contact</th>
+      </tr>
+    </thead>
+    <tbody>${tbodyRows}</tbody>`;
+
+  wrap.appendChild(table);
+  container.appendChild(wrap);
+}
+
+// ─── Map view ─────────────────────────────────────────────────────────────
+// Simple click-to-show approach: sidebar lists all filtered churches; clicking
+// one instantly loads a Google Maps iframe for that address. No API key needed,
+// no geocoding, loads in under a second every time.
+
+function renderMapView(churches, container) {
+  if (!churches.length) return;
+
+  mapSelectedIndex = -1;
+
+  const layout  = document.createElement("div");
+  layout.className = "map-layout";
+
+  const listDiv = document.createElement("div");
+  listDiv.className = "map-list";
+
+  const statusBar = document.createElement("div");
+  statusBar.className = "map-status";
+  statusBar.textContent = `${churches.length} church${churches.length !== 1 ? "es" : ""} — click one to view on map`;
+  listDiv.appendChild(statusBar);
+
+  const mapPane = document.createElement("div");
+  mapPane.className = "map-pane";
+  mapPane.innerHTML = `
+    <div class="map-placeholder">
+      <div class="map-placeholder-icon">📍</div>
+      <p>Select a church from the list<br>to view its location</p>
+    </div>`;
+
+  churches.forEach((church, i) => {
+    const item    = buildMapSidebarItem(church, i + 1);
+    const address = [church.street, church.city, church.state, church.zip]
+      .filter(Boolean).join(", ");
+
+    item.addEventListener("click", () => {
+      listDiv.querySelectorAll(".map-item.is-active")
+        .forEach((el) => el.classList.remove("is-active"));
+      item.classList.add("is-active");
+      item.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      mapSelectedIndex = i;
+
+      if (!address) {
+        mapPane.innerHTML = `<div class="map-placeholder"><p>No address on file for this church.</p></div>`;
+        return;
+      }
+
+      const q = encodeURIComponent(address);
+      mapPane.innerHTML = `
+        <iframe
+          src="https://maps.google.com/maps?q=${q}&output=embed&z=15"
+          class="map-frame"
+          frameborder="0"
+          loading="lazy"
+          allowfullscreen
+          referrerpolicy="no-referrer-when-downgrade">
+        </iframe>
+        <div class="map-directions-bar">
+          <span class="map-directions-addr">${escapeHtml(address)}</span>
+          <a class="map-directions-btn"
+             href="https://www.google.com/maps/dir/?api=1&destination=${q}"
+             target="_blank" rel="noopener noreferrer">
+            Get Directions →
+          </a>
+        </div>`;
+    });
+
+    listDiv.appendChild(item);
+  });
+
+  layout.appendChild(listDiv);
+  layout.appendChild(mapPane);
+  container.appendChild(layout);
+}
+
+function buildMapSidebarItem(church, number) {
+  const item = document.createElement("div");
+  item.className = "map-item";
+
+  const cityLine = [church.city, church.state, church.zip].filter(Boolean).join(", ");
+  const addrLine = [church.street, cityLine].filter(Boolean).join(", ");
+  const svcLines = church.services
+    .map((s) => {
+      const name = s.serviceTimeName || s.serviceName || "";
+      const meta = [s.serviceDay, s.serviceTime].filter(Boolean).join(" · ");
+      return [name, meta].filter(Boolean).join(" · ");
+    })
+    .filter(Boolean);
+
+  item.innerHTML = `
+    <div class="map-item-num">${number}</div>
+    <div class="map-item-body">
+      ${church.district ? `<div class="map-item-district">${escapeHtml(church.district)}</div>` : ""}
+      <div class="map-item-title">${escapeHtml(church.accountName || "")}</div>
+      ${addrLine ? `<div class="map-item-addr">${escapeHtml(addrLine)}</div>` : ""}
+      ${svcLines.length
+        ? `<div class="map-item-svcs">${svcLines.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}</div>`
+        : ""}
+    </div>`;
+
+  return item;
+}
+
+// ─── Church detail modal ──────────────────────────────────────────────────
+function openChurchModal(church) {
+  const overlay = document.getElementById("churchModal");
+  const content = document.getElementById("modalContent");
+  if (!overlay || !content) return;
+
+  const cityLine = [church.city, church.state, church.zip].filter(Boolean).join(", ");
+  const fullAddr = [church.street, cityLine].filter(Boolean).join(", ");
+
+  const websiteUrl  = church.website
+    ? (!/^https?:\/\//i.test(church.website) ? "https://" + church.website : church.website)
+    : "";
+  const websiteHref = escapeHtml(encodeURI(websiteUrl));
+  const emailHref   = escapeHtml(church.email || "");
+
+  const hasServices = church.services && church.services.some(
+    (s) => s.serviceDay || s.serviceTime || s.serviceTimeName || s.serviceName
+  );
+
+  const servicesHtml = hasServices
+    ? church.services.map((svc) => {
+        const name = svc.serviceTimeName || svc.serviceName || "Worship Service";
+        const meta = [svc.serviceDay, svc.serviceTime].filter(Boolean).join(" · ");
+        return `
+          <div class="modal-service-item">
+            <span class="modal-svc-name">${escapeHtml(name)}</span>
+            ${meta ? `<span class="modal-svc-time">${escapeHtml(meta)}</span>` : ""}
+          </div>`;
+      }).join("")
+    : `<p class="modal-no-services">No service times listed.</p>`;
+
+  const contactHtml = [
+    church.phone
+      ? `<div class="modal-contact-item"><span class="modal-contact-label">Phone</span><span class="modal-contact-value"><a href="tel:${escapeHtml(church.phone)}">${escapeHtml(church.phone)}</a></span></div>`
+      : "",
+    emailHref
+      ? `<div class="modal-contact-item"><span class="modal-contact-label">Email</span><span class="modal-contact-value"><a href="mailto:${emailHref}">${escapeHtml(church.email)}</a></span></div>`
+      : "",
+    websiteHref
+      ? `<div class="modal-contact-item"><span class="modal-contact-label">Website</span><span class="modal-contact-value"><a href="${websiteHref}" target="_blank" rel="noopener noreferrer">${escapeHtml(church.website)}</a></span></div>`
+      : "",
+  ].filter(Boolean).join("");
+
+  const mapQuery = encodeURIComponent(
+    [church.street, church.city, church.state, church.zip].filter(Boolean).join(", ")
+  );
+
+  content.innerHTML = `
+    ${church.photo
+      ? `<div class="modal-photo">
+           <img src="${escapeHtml(church.photo)}"
+                alt="${escapeHtml(church.accountName || "")}" />
+         </div>`
+      : ""}
+    <div class="modal-body">
+      <div class="modal-header">
+        <div>
+          <div class="modal-church-name" id="modalChurchName">${escapeHtml(church.accountName || "Unnamed Church")}</div>
+          ${church.district ? `<span class="district-pill">${escapeHtml(church.district)}</span>` : ""}
+        </div>
+      </div>
+      ${fullAddr ? `<div class="modal-section-label">Address</div><div class="modal-address">${escapeHtml(fullAddr)}</div>` : ""}
+      <div class="modal-section-label">Services</div>
+      <div class="modal-services-list">${servicesHtml}</div>
+      ${contactHtml ? `<div class="modal-section-label">Contact</div><div class="modal-contact-grid">${contactHtml}</div>` : ""}
+      ${fullAddr ? `
+        <div class="modal-section-label">Location</div>
+        <div class="modal-map-wrap">
+          <iframe
+            src="https://maps.google.com/maps?q=${mapQuery}&output=embed&z=15"
+            class="modal-map-frame"
+            frameborder="0"
+            loading="lazy"
+            allowfullscreen
+            referrerpolicy="no-referrer-when-downgrade">
+          </iframe>
+          <a class="modal-directions-btn"
+             href="https://www.google.com/maps/dir/?api=1&destination=${mapQuery}"
+             target="_blank" rel="noopener noreferrer">
+            Get Directions →
+          </a>
+        </div>` : ""}
+    </div>`;
+
+  overlay.removeAttribute("hidden");
+  document.body.style.overflow = "hidden";
+  document.getElementById("modalClose")?.focus();
+}
+
+function closeChurchModal() {
+  const overlay = document.getElementById("churchModal");
+  if (overlay) overlay.setAttribute("hidden", "");
+  document.body.style.overflow = "";
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+function updateViewToggle() {
+  ["cards", "list", "map"].forEach((mode) => {
+    const btn = document.querySelector(`.view-btn[data-view="${mode}"]`);
+    if (!btn) return;
+    btn.classList.toggle("is-active", currentView === mode);
+  });
+  moveViewToggleSlider();
+}
+
+// Slide the red pill under the currently active view button.
+// offsetLeft is relative to .view-toggle (position:relative); we subtract
+// the 3px toggle padding so the slider aligns flush with the button.
+function moveViewToggleSlider() {
+  const activeBtn = document.querySelector(".view-btn.is-active");
+  const slider    = document.getElementById("viewToggleSlider");
+  if (!activeBtn || !slider) return;
+  slider.style.width     = activeBtn.offsetWidth + "px";
+  slider.style.transform = `translateX(${activeBtn.offsetLeft - 3}px)`;
+}
+
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+document.addEventListener("DOMContentLoaded", init);

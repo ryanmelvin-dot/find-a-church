@@ -1,0 +1,23 @@
+# Environment variables — NEVER commit secrets
+.env
+.env.local
+.env*.local
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# Netlify local dev cache
+.netlify/
+
+# Generated files from the CSV-to-JSON helper script
+inumc_design_info.json
+inumc_homepage_full.png
+inumc_homepage_viewport.png
+INUMC_DESIGN_REPORT.md
+
+# Claude Code local settings
+.claude/

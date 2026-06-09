@@ -1,0 +1,6 @@
+# Netlify configuration
+# Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
+
+[build]
+  publish   = "."
+  functions = "netlify/functions"
