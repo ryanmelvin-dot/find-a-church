@@ -684,7 +684,7 @@ function renderCardView(churches, container) {
           <div class="card-links">
             ${emailHref   ? `<a class="card-link" href="mailto:${emailHref}">Email →</a>` : ""}
             ${websiteHref ? `<a class="card-link" href="${websiteHref}" target="_blank" rel="noopener noreferrer">Website →</a>` : ""}
-            ${church.phone ? `<a class="card-link" href="tel:${escapeHtml(church.phone)}">${escapeHtml(church.phone)}</a>` : ""}
+            ${church.phone ? `<a class="card-link" href="tel:${escapeHtml(church.phone)}">${escapeHtml(formatPhone(church.phone))}</a>` : ""}
           </div>
         </div>
       </div>`;
@@ -743,7 +743,7 @@ function renderListView(churches, container) {
     const contactHtml = [
       emailHref    ? `<a class="list-email-link" href="mailto:${emailHref}">Email →</a>` : "",
       websiteHref  ? `<a class="list-email-link" href="${websiteHref}" target="_blank" rel="noopener noreferrer">Website →</a>` : "",
-      church.phone ? `<a class="list-email-link" href="tel:${escapeHtml(church.phone)}">${escapeHtml(church.phone)}</a>` : "",
+      church.phone ? `<a class="list-email-link" href="tel:${escapeHtml(church.phone)}">${escapeHtml(formatPhone(church.phone))}</a>` : "",
     ].filter(Boolean).join("");
 
     return `<tr>
@@ -938,6 +938,18 @@ function buildMapPopupHtml(church) {
     .filter(Boolean)
     .slice(0, 4);
 
+  const emailHref   = escapeHtml(church.email || "");
+  const websiteUrl  = church.website
+    ? (!/^https?:\/\//i.test(church.website) ? "https://" + church.website : church.website)
+    : "";
+  const websiteHref = escapeHtml(encodeURI(websiteUrl));
+
+  const contactHtml = [
+    church.phone ? `<a href="tel:${escapeHtml(church.phone)}">${escapeHtml(formatPhone(church.phone))}</a>` : "",
+    emailHref    ? `<a href="mailto:${emailHref}">Email →</a>` : "",
+    websiteHref  ? `<a href="${websiteHref}" target="_blank" rel="noopener noreferrer">Website →</a>` : "",
+  ].filter(Boolean).join("");
+
   return `
     <div class="map-popup">
       <div class="map-popup-title">${escapeHtml(church.accountName || "")}</div>
@@ -945,6 +957,7 @@ function buildMapPopupHtml(church) {
       ${services.length
         ? `<div class="map-popup-svcs">${services.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}</div>`
         : ""}
+      ${contactHtml ? `<div class="map-popup-contact">${contactHtml}</div>` : ""}
       ${address
         ? `<a class="map-popup-directions"
               href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}"
@@ -1022,7 +1035,7 @@ function openChurchModal(church, triggerEl = null) {
 
   const contactHtml = [
     church.phone
-      ? `<div class="modal-contact-item"><span class="modal-contact-label">Phone</span><span class="modal-contact-value"><a href="tel:${escapeHtml(church.phone)}">${escapeHtml(church.phone)}</a></span></div>`
+      ? `<div class="modal-contact-item"><span class="modal-contact-label">Phone</span><span class="modal-contact-value"><a href="tel:${escapeHtml(church.phone)}">${escapeHtml(formatPhone(church.phone))}</a></span></div>`
       : "",
     emailHref
       ? `<div class="modal-contact-item"><span class="modal-contact-label">Email</span><span class="modal-contact-value"><a href="mailto:${emailHref}">${escapeHtml(church.email)}</a></span></div>`
@@ -1113,6 +1126,14 @@ function moveViewToggleSlider() {
 
 function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Display 10/11-digit US numbers as (XXX) XXX-XXXX; anything else as entered.
+function formatPhone(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  const d = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (d.length !== 10) return phone;
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
 function escapeHtml(str) {
