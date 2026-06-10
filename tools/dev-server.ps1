@@ -1,4 +1,4 @@
-# Local development server for the Find a Church site.
+﻿# Local development server for the Find a Church site.
 #
 # This machine doesn't need Node or the Netlify CLI to preview the site:
 # this script serves the static files in public/ and emulates the

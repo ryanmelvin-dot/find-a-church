@@ -1073,11 +1073,11 @@ a:hover {
   height: 100%;
 }
 
-.map-frame {
+/* Container the Leaflet map mounts into — must have a concrete height */
+.leaflet-host {
   width: 100%;
+  height: 100%;
   flex: 1;
-  border: 0;
-  display: block;
   min-height: 0;
 }
 
@@ -1104,36 +1104,45 @@ a:hover {
   line-height: 1.6;
 }
 
-/* Directions bar below the map iframe */
-.map-directions-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-light);
-  flex-shrink: 0;
+/* Leaflet popup theming */
+.leaflet-popup-content-wrapper {
+  border-radius: var(--radius-md);
 }
 
-.map-directions-addr {
+.leaflet-popup-content {
+  font-family: var(--font-sans);
+  margin: 14px 16px;
+  line-height: 1.5;
+}
+
+.map-popup-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--dark);
+  margin-bottom: 2px;
+}
+
+.map-popup-addr {
   font-size: 12px;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-bottom: 6px;
 }
 
-.map-directions-btn {
+.map-popup-svcs div {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.map-popup-directions {
+  display: inline-block;
+  margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
   color: var(--red-text);
   text-decoration: none;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
-.map-directions-btn:hover {
+.map-popup-directions:hover {
   text-decoration: underline;
 }
 
@@ -1433,10 +1442,6 @@ a:hover {
   .map-pane {
     height: 420px;
   }
-
-  .map-frame {
-    height: 420px;
-  }
 }
 
 @media (max-width: 600px) {
@@ -1472,10 +1477,6 @@ a:hover {
   }
 
   .map-pane {
-    height: 320px;
-  }
-
-  .map-frame {
     height: 320px;
   }
 

@@ -18,9 +18,12 @@ The site is themed to match **INUMC.org** — dark charcoal header, red accent c
 | `public/index.html` | The public-facing webpage — all layout and structure |
 | `public/styles.css` | All visual styling, colors, fonts, and responsive layout |
 | `public/scripts.js` | All JavaScript logic — fetches data, filters, and renders views |
-| `public/assets/` | Logo and other static images |
+| `public/assets/` | Logo, favicons, and `churches-geo.json` (map coordinates) |
+| `public/vendor/leaflet/` | Leaflet map library (v1.9.4, served from our own site) |
 | `netlify/functions/churches.mjs` | Secure serverless function — calls Airtable API server-side |
 | `netlify.toml` | Netlify deployment configuration (publishes only `public/`) |
+| `tools/dev-server.ps1` | Local preview server (no Node.js required) |
+| `tools/geocode-churches.ps1` | Regenerates map coordinates after Airtable address changes |
 | `.env` | Local development secrets (never committed to git, never deployed) |
 | `.gitignore` | Prevents secrets and junk files from being committed |
 
@@ -104,6 +107,18 @@ The Airtable token is stored as a **Netlify environment variable** — it exists
 
 The next time anyone visits the website, they will see the updated data. Changes are reflected **within seconds** of being saved in Airtable (subject to a 5-minute CDN cache on Netlify, which improves performance by reducing the number of calls to Airtable).
 
+**One extra step for the map view:** the map plots churches using pre-computed
+coordinates stored in `public/assets/churches-geo.json`. After adding churches
+or changing addresses, regenerate that file and redeploy:
+
+```
+powershell -ExecutionPolicy Bypass -File tools\geocode-churches.ps1
+```
+
+The script only geocodes churches that don't already have coordinates, so it
+runs in seconds. A church without coordinates still appears in every view —
+it just won't have a dot on the map until the script is rerun.
+
 ---
 
 ## What Users Can Do on the Website
@@ -121,7 +136,7 @@ A text search bar filters results by church name, city, ZIP code, district, or s
 |---|---|
 | **Cards** | Visual cards with church name, location, service details, and contact links |
 | **List** | Compact table view — good for scanning a large number of results |
-| **Map** | Side-by-side list and embedded Google Map — click any church to see its location |
+| **Map** | A statewide map with **every church plotted at once** — click a dot or a sidebar entry for details and directions |
 
 ---
 
@@ -185,7 +200,9 @@ the serverless function by calling Airtable directly with the `.env` credentials
 | Airtable REST API | How the serverless function reads data |
 | Netlify Functions | Serverless proxy — keeps the API token secure |
 | Netlify Hosting | Static site hosting + function runtime |
-| Google Maps (embed) | Map view — no API key required |
+| Leaflet + OpenStreetMap | Map view — all churches plotted at once, no API key required |
+| Google Maps (embed) | Location preview inside the church detail modal + directions links |
+| US Census geocoder | Converts church addresses to map coordinates (free, no key) |
 
 ---
 
