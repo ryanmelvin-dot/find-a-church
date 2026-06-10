@@ -1014,8 +1014,10 @@ function renderMapView(churches, container) {
   // Falls back to a plain layer group if the plugin didn't load.
   const dotLayer = typeof L.markerClusterGroup === "function"
     ? L.markerClusterGroup({
-        maxClusterRadius: 45,
-        disableClusteringAtZoom: 12,
+        // Light-touch clustering: dots merge only when they would physically
+        // overlap (dots are ~17px wide), and clustering ends at zoom 10.
+        maxClusterRadius: 15,
+        disableClusteringAtZoom: 10,
         showCoverageOnHover: false,
         iconCreateFunction: (cluster) => {
           const n    = cluster.getChildCount();
