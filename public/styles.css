@@ -11,6 +11,7 @@
 
   /* Surfaces */
   --bg:            #ffffff;
+  --bg-page:       #f5f6f8;   /* soft off-white page behind white cards */
   --bg-secondary:  #f7f6f6;
   --bg-light:      #f0eeee;
 
@@ -24,12 +25,16 @@
   --border-light:  #e4e4e4;
   --border-active: #141827;
 
-  /* Shadows (flat, minimal) */
-  --shadow-card:   0 1px 6px 2px rgba(0, 0, 0, 0.08);
+  /* Shadows — soft and layered for depth without harsh edges */
+  --shadow-card:   0 1px 2px rgba(20, 24, 39, 0.05), 0 4px 16px rgba(20, 24, 39, 0.06);
+  --shadow-lift:   0 2px 4px rgba(20, 24, 39, 0.06), 0 14px 32px rgba(20, 24, 39, 0.12);
+  --shadow-panel:  0 2px 6px rgba(20, 24, 39, 0.05), 0 16px 40px rgba(20, 24, 39, 0.10);
 
-  /* Radii — flat design, 4px default */
-  --radius:        4px;
-  --radius-md:     6px;
+  /* Radii */
+  --radius:        8px;
+  --radius-md:     10px;
+  --radius-lg:     14px;
+  --radius-xl:     16px;
   --radius-pill:   999px;
 
   /* Typography */
@@ -56,10 +61,12 @@ body {
   font-size: 15px;
   line-height: 1.65;
   color: var(--text-primary);
-  background-color: var(--bg);
+  background-color: var(--bg-page);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 a {
@@ -165,15 +172,19 @@ a:hover {
 .page {
   flex: 1;
   max-width: var(--max-width);
-  margin: 0 auto;
-  padding: 28px 24px 56px;
+  /* Negative top margin floats the search panel over the hero's bottom edge */
+  margin: -56px auto 0;
+  padding: 0 24px 56px;
   width: 100%;
 }
 
 /* ─── Hero (full-width dark section above .page) ─────────────────────────── */
 .hero {
-  background: var(--charcoal);
-  padding: 52px 24px 60px;
+  /* Layered charcoal gradient with a faint red glow for depth */
+  background:
+    radial-gradient(640px 320px at 82% 0%, rgba(246, 27, 55, 0.16), transparent 65%),
+    linear-gradient(150deg, #34343e 0%, #26262e 100%);
+  padding: 56px 24px 104px;   /* extra bottom room — the search panel overlaps */
 }
 
 .hero-inner {
@@ -194,6 +205,8 @@ a:hover {
   font-size: clamp(26px, 4vw, 44px);
   font-weight: 700;
   line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
   color: #ffffff;
   margin-bottom: 14px;
 }
@@ -211,12 +224,14 @@ a:hover {
 
 /* ─── Search panel ───────────────────────────────────────────────────────── */
 .search-panel {
+  position: relative;   /* keeps the panel above the hero it overlaps */
+  z-index: 5;
   background: #ffffff;
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.07);
-  padding: 20px 22px 16px;
-  margin-bottom: 24px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-panel);
+  padding: 22px 24px 18px;
+  margin-bottom: 28px;
 }
 
 .search-row {
@@ -272,10 +287,26 @@ a:hover {
   font-family: var(--font-sans);
   font-size: 14px;
   outline: none;
-  background: var(--bg-secondary);    /* slightly tinted to feel more distinct */
+  background: #ffffff;
   color: var(--text-primary);
-  min-height: 40px;
+  min-height: 42px;
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: #b6b6bd;
+}
+
+/* Custom chevron so dropdowns look consistent across browsers */
+.field select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%235d5d5d' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 34px;
+  cursor: pointer;
 }
 
 .field input:focus,
@@ -304,13 +335,14 @@ a:hover {
   left: 11px;
   top: 50%;
   transform: translateY(-50%);
-  opacity: 0.35;
+  opacity: 0.45;
   pointer-events: none;
 }
 
-.icon-search::before {
-  content: "⌕";
-  font-size: 18px;
+.icon-search {
+  width: 16px;
+  height: 16px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='5' fill='none' stroke='%23141827' stroke-width='1.6'/%3E%3Cpath d='M11 11l3.5 3.5' stroke='%23141827' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / contain;
 }
 
 /* ─── Buttons ────────────────────────────────────────────────────────────── */
@@ -428,7 +460,7 @@ a:hover {
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
+  gap: 20px;
 }
 
 /* ─── Church card ────────────────────────────────────────────────────────── */
@@ -436,20 +468,39 @@ a:hover {
   background: var(--bg);
   border: 1px solid var(--border-light);
   border-left: 3px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   overflow: hidden;              /* clips the photo to the card's rounded corners */
   display: flex;
   flex-direction: column;
   gap: 0;
   box-shadow: var(--shadow-card);
   cursor: pointer;
-  transition: border-left-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  transition: border-left-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .card:hover {
   border-left-color: var(--red);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.10);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-4px);
+}
+
+/* Gentle entrance animations — skipped for users who prefer reduced motion */
+@media (prefers-reduced-motion: no-preference) {
+  .card {
+    animation: rise-in 0.25s ease backwards;
+  }
+
+  .modal-dialog {
+    animation: modal-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1) backwards;
+  }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
 }
 
 /* Keyboard focus indicator for clickable cards and map sidebar items */
@@ -719,9 +770,11 @@ a:hover {
 /* ─── Empty / loading states ─────────────────────────────────────────────── */
 .empty-state {
   margin-top: 20px;
-  padding: 48px 24px;
-  border: 1px dashed var(--border);
-  background: var(--bg-secondary);
+  padding: 56px 24px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+  box-shadow: var(--shadow-card);
   text-align: center;
 }
 
@@ -757,7 +810,9 @@ a:hover {
 .list-wrap {
   width: 100%;
   overflow-x: auto;              /* horizontal scroll on small screens */
-  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
   box-shadow: var(--shadow-card);
 }
 
@@ -767,22 +822,22 @@ a:hover {
   border-collapse: collapse;
   font-size: 13px;
   background: var(--bg);
-  border: 1px solid var(--border-light);
 }
 
 .list-table thead {
-  background: var(--charcoal);
-  color: #ffffff;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
 }
 
 .list-table th {
-  padding: 11px 16px;
+  padding: 12px 16px;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   text-align: left;
   white-space: nowrap;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .list-table td {
@@ -885,9 +940,27 @@ a:hover {
   grid-template-columns: 280px 1fr;
   height: 680px;
   border: 1px solid var(--border-light);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-card);
+}
+
+/* Thin scrollbars for internal scroll areas */
+.map-list,
+.modal-content {
+  scrollbar-width: thin;
+  scrollbar-color: #c9cad1 transparent;
+}
+
+.map-list::-webkit-scrollbar,
+.modal-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.map-list::-webkit-scrollbar-thumb,
+.modal-content::-webkit-scrollbar-thumb {
+  background: #c9cad1;
+  border-radius: 8px;
 }
 
 .map-list {
@@ -1089,7 +1162,7 @@ a:hover {
 .modal-dialog {
   position: relative;
   background: var(--bg);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xl);
   border-top: 4px solid var(--red);
   max-width: 580px;
   width: 100%;
@@ -1386,7 +1459,7 @@ a:hover {
   }
 
   .hero {
-    padding: 36px 20px 44px;
+    padding: 36px 20px 88px;
   }
 
   .search-row-secondary {
