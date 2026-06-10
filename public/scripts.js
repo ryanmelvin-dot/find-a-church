@@ -869,8 +869,22 @@ function renderMapView(churches, container) {
         fillColor: "#d41530",
         fillOpacity: 0.92,
       }).addTo(leafletMap);
-      marker.bindPopup(buildMapPopupHtml(church), { maxWidth: 260 });
+      // autoPan off so sweeping the cursor across dots doesn't drag the map
+      marker.bindPopup(buildMapPopupHtml(church), { maxWidth: 260, autoPan: false });
       marker.on("click", () => highlightItem(i, true));
+
+      // Hover: grow the dot and show its info right away. The popup stays
+      // open on mouseout (so its links remain clickable) and Leaflet
+      // auto-closes it when another dot's popup opens.
+      marker.on("mouseover", () => {
+        marker.setRadius(10);
+        marker.setStyle({ weight: 2 });
+        marker.openPopup();
+      });
+      marker.on("mouseout", () => {
+        marker.setRadius(7);
+        marker.setStyle({ weight: 1.5 });
+      });
     }
 
     const selectChurch = () => {
