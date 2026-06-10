@@ -1111,6 +1111,13 @@ a:hover {
   line-height: 1.6;
 }
 
+/* The visitor's own location pin (shown after using "Near me") */
+.you-pin {
+  background: none;
+  border: none;
+  filter: drop-shadow(0 2px 3px rgba(20, 24, 39, 0.4));
+}
+
 /* Leaflet popup theming */
 .leaflet-popup-content-wrapper {
   border-radius: var(--radius-md);

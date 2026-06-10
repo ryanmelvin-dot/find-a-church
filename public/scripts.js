@@ -1005,6 +1005,13 @@ function renderListView(churches, container) {
 
 const INDIANA_CENTER = [39.85, -86.26];
 
+// Black "you are here" pin shown after the visitor uses Near me
+const YOU_PIN_SVG = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="28" height="40" viewBox="0 0 28 40">
+    <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.3 21.7 0 14 0z" fill="#141827"/>
+    <circle cx="14" cy="14" r="5.5" fill="#ffffff"/>
+  </svg>`;
+
 function renderMapView(churches, container) {
   if (!churches.length) return;
 
@@ -1127,8 +1134,29 @@ function renderMapView(churches, container) {
     ? `${churches.length} church${churches.length !== 1 ? "es" : ""} on the map`
     : `${plotted} of ${churches.length} churches on the map`;
 
+  // The visitor's own location, marked with a black pin (after Near me)
+  if (userLoc) {
+    L.marker(userLoc, {
+      icon: L.divIcon({
+        html: YOU_PIN_SVG,
+        className: "you-pin",
+        iconSize: [28, 40],
+        iconAnchor: [14, 40],   // the pin's tip sits on the exact spot
+      }),
+      keyboard: false,
+      zIndexOffset: 1000,       // always above the church dots
+    }).addTo(leafletMap).bindTooltip("Your location", { direction: "top", offset: [0, -38] });
+  }
+
   // Frame all dots; fall back to the statewide view when nothing plotted
   const points = markers.filter(Boolean).map((m) => m.getLatLng());
+  // Keep the visitor's pin in frame too — unless they're far outside the
+  // plotted area (an out-of-state visitor would zoom the map out absurdly)
+  if (userLoc && points.some((p) =>
+    Math.abs(p.lat - userLoc[0]) < 2 && Math.abs(p.lng - userLoc[1]) < 2
+  )) {
+    points.push(L.latLng(userLoc[0], userLoc[1]));
+  }
   if (points.length > 1) {
     leafletMap.fitBounds(L.latLngBounds(points).pad(0.06));
   } else if (points.length === 1) {
