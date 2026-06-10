@@ -21,6 +21,7 @@ The site is themed to match **INUMC.org** — dark charcoal header, red accent c
 | `public/assets/` | Logo, favicons, and `churches-geo.json` (map coordinates) |
 | `public/vendor/leaflet/` | Leaflet map library (v1.9.4, served from our own site) |
 | `netlify/functions/churches.mjs` | Secure serverless function — calls Airtable API server-side |
+| `netlify/functions/geocode-airtable.mjs` | Scheduled daily — geocodes new churches into Airtable |
 | `netlify.toml` | Netlify deployment configuration (publishes only `public/`) |
 | `tools/dev-server.ps1` | Local preview server (no Node.js required) |
 | `tools/geocode-churches.ps1` | Regenerates map coordinates after Airtable address changes |
@@ -107,17 +108,24 @@ The Airtable token is stored as a **Netlify environment variable** — it exists
 
 The next time anyone visits the website, they will see the updated data. Changes are reflected **within seconds** of being saved in Airtable (subject to a 5-minute CDN cache on Netlify, which improves performance by reducing the number of calls to Airtable).
 
-**One extra step for the map view:** the map plots churches using pre-computed
-coordinates stored in `public/assets/churches-geo.json`. After adding churches
-or changing addresses, regenerate that file and redeploy:
+**Map coordinates are handled automatically.** A scheduled serverless function
+(`netlify/functions/geocode-airtable.mjs`) runs daily: it finds churches that
+have an address but no coordinates, geocodes them with the free US Census
+service, and writes the results into `Latitude` / `Longitude` fields on the
+Churches table. New churches get their map dot within a day — no manual steps.
 
-```
-powershell -ExecutionPolicy Bypass -File tools\geocode-churches.ps1
-```
+Two one-time setup items make this work:
 
-The script only geocodes churches that don't already have coordinates, so it
-runs in seconds. A church without coordinates still appears in every view —
-it just won't have a dot on the map until the script is rerun.
+1. Add two **number fields** named `Latitude` and `Longitude` to the Churches
+   table in Airtable.
+2. Add an `AIRTABLE_WRITE_TOKEN` environment variable in Netlify — a Personal
+   Access Token scoped to this base with `data.records:read` and
+   `data.records:write`. (The site itself keeps using the read-only token.)
+
+Coordinates can also be typed into Airtable by hand — the function never
+overwrites a filled-in value — which is the fix for the rare address the
+Census service can't match. `public/assets/churches-geo.json` remains bundled
+as a fallback, and `tools/geocode-churches.ps1` can still bulk-regenerate it.
 
 ---
 
@@ -161,6 +169,7 @@ Set these under **Site configuration → Environment variables**:
 | Variable | Value |
 |---|---|
 | `AIRTABLE_TOKEN` | Your Airtable Personal Access Token (read-only, scoped to this base) |
+| `AIRTABLE_WRITE_TOKEN` | Write-scoped token used only by the daily geocoding function |
 | `AIRTABLE_BASE_ID` | `appewRNunToaMj9Om` |
 | `CHURCHES_TABLE` | `Churches` |
 | `SERVICES_TABLE` | `Services` |
@@ -211,6 +220,20 @@ the serverless function by calling Airtable directly with the `.env` credentials
 To report inaccuracies in the directory: **in.comm@inumc.org**
 
 To update church or service records: log into Airtable and edit the Churches or Services table directly.
+
+---
+
+## Search engines & sharing
+
+- Every filter combination, view, and open church is reflected in the page URL,
+  so links can be bookmarked or shared (e.g. `?district=North&view=map`, or
+  `?church=123456` to open one church's details directly).
+- The page injects schema.org structured data (name, address, coordinates,
+  phone, website for every church) so search engines can index the directory.
+- `robots.txt` allows all crawlers.
+- **After going live**, consider adding `<link rel="canonical">` and an
+  `og:image` tag to `index.html` with the production URL — both need the final
+  domain, so they were left out until the site has one.
 
 ---
 

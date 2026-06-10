@@ -49,6 +49,8 @@ let filteredRows = [];
 let currentView  = "cards";
 let churchGeo    = {};   // gcfa -> [lat, lng]
 let leafletMap   = null; // active Leaflet instance (map view only)
+let userLoc      = null; // [lat, lng] from the Near me button
+let modalGcfa    = null; // GCFA ID of the church open in the modal (for the URL)
 
 // Pagination (card view only)
 let currentPage = 1;
@@ -136,6 +138,10 @@ function normalizeChurches(records) {
       zip:      getField(f, CHURCH_FIELDS.zip),
       website:  getField(f, CHURCH_FIELDS.website),
       photo,
+      // Optional Latitude/Longitude columns — written by the scheduled
+      // geocoding function or entered by hand in Airtable.
+      lat:      parseFloat(getField(f, "Latitude")),
+      lng:      parseFloat(getField(f, "Longitude")),
     };
   }).filter((c) => {
     if (!c.gcfa || seenGcfa.has(c.gcfa)) return false;
@@ -286,11 +292,31 @@ async function init() {
       );
     }
 
+    // Coordinates stored directly in Airtable override the static
+    // churches-geo.json snapshot (which remains as the seed/fallback).
+    churches.forEach((c) => {
+      if (Number.isFinite(c.lat) && Number.isFinite(c.lng)) {
+        churchGeo[c.gcfa] = [c.lat, c.lng];
+      }
+    });
+
     // Populate all dynamic dropdowns from live data
     populateDynamicFilters(allRows);
 
+    // Restore any shared/bookmarked state from the URL before first render
+    const sharedChurch = applyUrlToControls();
+
     filteredRows = applyFilters(allRows);
     renderResults(filteredRows);
+
+    // schema.org markup so search engines can index every church
+    injectStructuredData();
+
+    // Deep link: ?church=<GCFA ID> opens that church's detail modal
+    if (sharedChurch) {
+      const church = groupByChurch(allRows).find((c) => c.gcfa === sharedChurch);
+      if (church) openChurchModal(church);
+    }
   } catch (err) {
     console.error("Find a Church fetch error:", err);
     if (loadingState) loadingState.setAttribute("hidden", "");
@@ -313,15 +339,66 @@ function wireControls() {
     currentPage  = 1;           // always jump back to page 1 on any filter change
     filteredRows = applyFilters(allRows);
     renderResults(filteredRows);
+    updateUrlFromState();
   };
 
-  document.getElementById("searchInput")   ?.addEventListener("input",  triggerFilter);
+  // Debounce the search box: re-rendering on every keystroke is expensive in
+  // map view (the whole map rebuilds), so wait for a short typing pause.
+  let searchTimer = null;
+  const debouncedFilter = () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(triggerFilter, 180);
+  };
+
+  document.getElementById("searchInput")   ?.addEventListener("input",  debouncedFilter);
   document.getElementById("dayFilter")     ?.addEventListener("change", triggerFilter);
   document.getElementById("timeFilter")    ?.addEventListener("change", triggerFilter);
   document.getElementById("districtFilter")?.addEventListener("change", triggerFilter);
   document.getElementById("cityFilter")    ?.addEventListener("change", triggerFilter);
   document.getElementById("zipFilter")     ?.addEventListener("change", triggerFilter);
-  document.getElementById("sortSelect")    ?.addEventListener("change", triggerFilter);
+
+  // Choosing "Nearest first" without a known location asks for it first
+  document.getElementById("sortSelect")?.addEventListener("change", (e) => {
+    if (e.target.value === "distance" && !userLoc) {
+      requestUserLocation();   // re-filters once the location arrives
+      return;
+    }
+    triggerFilter();
+  });
+
+  // ── Near me ────────────────────────────────────────────────────────────
+  const nearMeBtn = document.getElementById("nearMeBtn");
+
+  function requestUserLocation() {
+    if (!navigator.geolocation) {
+      if (nearMeBtn) nearMeBtn.textContent = "Location unsupported";
+      return;
+    }
+    if (nearMeBtn) nearMeBtn.textContent = "Locating…";
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        userLoc = [pos.coords.latitude, pos.coords.longitude];
+        const sort = document.getElementById("sortSelect");
+        if (sort) sort.value = "distance";
+        if (nearMeBtn) {
+          nearMeBtn.textContent = "Near me";
+          nearMeBtn.classList.add("is-active");
+        }
+        triggerFilter();
+      },
+      () => {
+        const sort = document.getElementById("sortSelect");
+        if (sort && sort.value === "distance") sort.value = "name-asc";
+        if (nearMeBtn) {
+          nearMeBtn.textContent = "Location blocked";
+          setTimeout(() => { nearMeBtn.textContent = "Near me"; }, 2500);
+        }
+      },
+      { maximumAge: 300000, timeout: 10000 }
+    );
+  }
+
+  nearMeBtn?.addEventListener("click", requestUserLocation);
 
   document.getElementById("clearFilters")?.addEventListener("click", () => {
     ["searchInput", "dayFilter", "timeFilter", "districtFilter",
@@ -331,9 +408,11 @@ function wireControls() {
     });
     const sort = document.getElementById("sortSelect");
     if (sort) sort.value = "name-asc";
+    nearMeBtn?.classList.remove("is-active");
     currentPage  = 1;
     filteredRows = applyFilters(allRows);
     renderResults(filteredRows);
+    updateUrlFromState();
   });
 
   // ── Modal close ────────────────────────────────────────────────────────
@@ -366,6 +445,7 @@ function wireControls() {
         currentView = view;
         updateViewToggle();
         renderResults(filteredRows);
+        updateUrlFromState();
       });
   });
 
@@ -411,6 +491,73 @@ function populateDynamicFilters(rows) {
       zipSelect.appendChild(opt);
     });
   }
+}
+
+// ─── Distance ("Near me") ──────────────────────────────────────────────────
+function haversineMiles(a, b) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const R = 3958.8; // earth radius in miles
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const s = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// Miles from the visitor to a church, or null when either side is unknown
+function distanceToChurch(gcfa) {
+  const coords = userLoc && churchGeo[gcfa];
+  return coords ? haversineMiles(userLoc, coords) : null;
+}
+
+function formatMiles(mi) {
+  return mi < 10 ? `${mi.toFixed(1)} mi` : `${Math.round(mi)} mi`;
+}
+
+// ─── Shareable URLs ────────────────────────────────────────────────────────
+// Filters, view, and the open church are mirrored into the query string so
+// any state can be bookmarked or shared. Defaults are omitted to keep URLs
+// clean; the visitor's location is never put in a URL.
+function updateUrlFromState() {
+  const val = (id) => document.getElementById(id)?.value || "";
+  const params = new URLSearchParams();
+  if (val("searchInput"))    params.set("q",        val("searchInput"));
+  if (val("dayFilter"))      params.set("day",      val("dayFilter"));
+  if (val("timeFilter"))     params.set("time",     val("timeFilter"));
+  if (val("districtFilter")) params.set("district", val("districtFilter"));
+  if (val("cityFilter"))     params.set("city",     val("cityFilter"));
+  if (val("zipFilter"))      params.set("zip",      val("zipFilter"));
+  const sort = val("sortSelect");
+  if (sort && sort !== "name-asc") params.set("sort", sort);
+  if (currentView !== "cards")     params.set("view", currentView);
+  if (modalGcfa)                   params.set("church", modalGcfa);
+  const qs = params.toString();
+  history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+}
+
+// Restore control state from the URL. Returns the ?church= deep-link target
+// (if any) so init can open that church's modal once data is rendered.
+function applyUrlToControls() {
+  const params = new URLSearchParams(location.search);
+  const set = (id, value) => {
+    const el = document.getElementById(id);
+    if (el && value) el.value = value;   // unknown values resolve to "" on selects
+  };
+  set("searchInput",    params.get("q"));
+  set("dayFilter",      params.get("day"));
+  set("timeFilter",     params.get("time"));
+  set("districtFilter", params.get("district"));
+  set("cityFilter",     params.get("city"));
+  set("zipFilter",      params.get("zip"));
+  const sort = params.get("sort");
+  // Distance sort needs the visitor's location, which we never auto-request
+  if (sort && sort !== "distance") set("sortSelect", sort);
+  const view = params.get("view");
+  if (["cards", "list", "map"].includes(view)) {
+    currentView = view;
+    updateViewToggle();
+  }
+  return params.get("church");
 }
 
 // ─── Filters ──────────────────────────────────────────────────────────────
@@ -463,6 +610,11 @@ function applyFilters(rows) {
   });
 
   filtered.sort((a, b) => {
+    if (sortVal === "distance" && userLoc) {
+      const da = distanceToChurch(a.gcfa) ?? Infinity;   // no coordinates -> last
+      const db = distanceToChurch(b.gcfa) ?? Infinity;
+      if (da !== db) return da - db;
+    }
     const cmp = (a.accountName || "").localeCompare(b.accountName || "", undefined, { sensitivity: "base" });
     return sortVal === "name-desc" ? -cmp : cmp;
   });
@@ -638,6 +790,8 @@ function renderCardView(churches, container) {
 
     const cityLine   = [church.city, church.state, church.zip].filter(Boolean).join(", ");
     const fullAddr   = [church.street, cityLine].filter(Boolean).join(", ");
+    const dist       = distanceToChurch(church.gcfa);
+    const addrText   = [fullAddr, dist != null ? formatMiles(dist) : ""].filter(Boolean).join(" · ");
 
     const websiteUrl  = church.website
       ? (!/^https?:\/\//i.test(church.website) ? "https://" + church.website : church.website)
@@ -675,7 +829,7 @@ function renderCardView(churches, container) {
         <div class="card-header">
           <div class="card-header-text">
             <div class="card-title">${escapeHtml(church.accountName || "Unnamed church")}</div>
-            ${fullAddr ? `<div class="card-address">${escapeHtml(fullAddr)}</div>` : ""}
+            ${addrText ? `<div class="card-address">${escapeHtml(addrText)}</div>` : ""}
           </div>
           ${church.district ? `<div class="district-pill">${escapeHtml(church.district)}</div>` : ""}
         </div>
@@ -718,7 +872,9 @@ function renderListView(churches, container) {
 
   const tbodyRows = churches.map((church) => {
     const cityLine = [church.city, church.state].filter(Boolean).join(", ");
-    const addrLine = [church.street, cityLine].filter(Boolean).join(", ");
+    const baseAddr = [church.street, cityLine].filter(Boolean).join(", ");
+    const dist     = distanceToChurch(church.gcfa);
+    const addrLine = [baseAddr, dist != null ? formatMiles(dist) : ""].filter(Boolean).join(" · ");
 
     const hasServices = church.services.some(
       (s) => s.serviceDay || s.serviceTime || s.serviceTimeName || s.serviceName
@@ -843,6 +999,26 @@ function renderMapView(churches, container) {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
   }).addTo(leafletMap);
 
+  // Cluster dense areas (metro Indianapolis is unreadable as raw dots).
+  // Falls back to a plain layer group if the plugin didn't load.
+  const dotLayer = typeof L.markerClusterGroup === "function"
+    ? L.markerClusterGroup({
+        maxClusterRadius: 45,
+        disableClusteringAtZoom: 12,
+        showCoverageOnHover: false,
+        iconCreateFunction: (cluster) => {
+          const n    = cluster.getChildCount();
+          const size = n >= 100 ? "lg" : n >= 25 ? "md" : "sm";
+          return L.divIcon({
+            html: `<div>${n}</div>`,
+            className: `church-cluster church-cluster-${size}`,
+            iconSize: null,
+          });
+        },
+      })
+    : L.layerGroup();
+  dotLayer.addTo(leafletMap);
+
   const items   = [];
   const markers = [];
   let plotted   = 0;
@@ -868,7 +1044,7 @@ function renderMapView(churches, container) {
         weight: 1.5,
         fillColor: "#d41530",
         fillOpacity: 0.92,
-      }).addTo(leafletMap);
+      }).addTo(dotLayer);
       // autoPan off so sweeping the cursor across dots doesn't drag the map
       marker.bindPopup(buildMapPopupHtml(church), { maxWidth: 260, autoPan: false });
       marker.on("click", () => highlightItem(i, true));
@@ -890,8 +1066,16 @@ function renderMapView(churches, container) {
     const selectChurch = () => {
       highlightItem(i, false);
       if (marker) {
-        leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 13));
-        marker.openPopup();
+        if (typeof dotLayer.zoomToShowLayer === "function") {
+          // Marker may be hidden inside a cluster — unfold it first
+          dotLayer.zoomToShowLayer(marker, () => {
+            leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 13));
+            marker.openPopup();
+          });
+        } else {
+          leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 13));
+          marker.openPopup();
+        }
       } else {
         // No coordinates on file — show full details instead
         openChurchModal(church, item);
@@ -974,7 +1158,9 @@ function buildMapSidebarItem(church, number) {
   item.setAttribute("aria-label", `${church.accountName || "Church"} — show on map`);
 
   const cityLine = [church.city, church.state, church.zip].filter(Boolean).join(", ");
-  const addrLine = [church.street, cityLine].filter(Boolean).join(", ");
+  const baseAddr = [church.street, cityLine].filter(Boolean).join(", ");
+  const dist     = distanceToChurch(church.gcfa);
+  const addrLine = [baseAddr, dist != null ? formatMiles(dist) : ""].filter(Boolean).join(" · ");
   const svcLines = church.services
     .map((s) => {
       const name = s.serviceTimeName || s.serviceName || "";
@@ -1089,6 +1275,10 @@ function openChurchModal(church, triggerEl = null) {
   overlay.removeAttribute("hidden");
   document.body.style.overflow = "hidden";
   document.getElementById("modalClose")?.focus();
+
+  // Reflect the open church in the URL so the link is shareable
+  modalGcfa = church.gcfa || null;
+  updateUrlFromState();
 }
 
 function closeChurchModal() {
@@ -1101,6 +1291,48 @@ function closeChurchModal() {
     lastModalTrigger.focus();
   }
   lastModalTrigger = null;
+  modalGcfa = null;
+  updateUrlFromState();
+}
+
+// ─── SEO: structured data ──────────────────────────────────────────────────
+// Injects schema.org markup for every church so search engines can index
+// names, addresses, and locations from this single-page directory.
+function injectStructuredData() {
+  if (document.getElementById("churchJsonLd")) return;
+
+  const items = groupByChurch(allRows).map((c) => {
+    const item = { "@type": "Church", name: c.accountName || "United Methodist Church" };
+
+    const address = {};
+    if (c.street) address.streetAddress   = c.street;
+    if (c.city)   address.addressLocality = c.city;
+    if (c.state)  address.addressRegion   = c.state;
+    if (c.zip)    address.postalCode      = c.zip;
+    if (Object.keys(address).length) item.address = { "@type": "PostalAddress", ...address };
+
+    const coords = churchGeo[c.gcfa];
+    if (coords) item.geo = { "@type": "GeoCoordinates", latitude: coords[0], longitude: coords[1] };
+    if (c.phone) item.telephone = c.phone;
+    if (c.website) {
+      item.url = /^https?:\/\//i.test(c.website) ? c.website : `https://${c.website}`;
+    }
+    return item;
+  });
+
+  const ld = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name: "Indiana United Methodist Churches",
+    numberOfItems: items.length,
+    itemListElement: items.map((item, i) => ({ "@type": "ListItem", position: i + 1, item })),
+  };
+
+  const script = document.createElement("script");
+  script.type = "application/ld+json";   // data block — not executed, CSP-exempt
+  script.id   = "churchJsonLd";
+  script.textContent = JSON.stringify(ld);
+  document.head.appendChild(script);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="vendor/leaflet/MarkerCluster.css" />
     <link rel="stylesheet" href="styles.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,9 +21,20 @@
       rel="stylesheet"
     />
     <script src="vendor/leaflet/leaflet.js" defer></script>
+    <script src="vendor/leaflet/leaflet.markercluster.js" defer></script>
     <script src="scripts.js" defer></script>
   </head>
   <body>
+    <noscript>
+      <p style="max-width: 720px; margin: 24px auto; padding: 0 24px;">
+        The Find a Church directory lists worship times, locations, and contact
+        information for more than 600 United Methodist congregations across
+        Indiana. This page requires JavaScript to search the live directory —
+        or contact the Indiana Conference at
+        <a href="mailto:in.comm@inumc.org">in.comm@inumc.org</a> or visit
+        <a href="https://www.inumc.org/">INUMC.org</a> for help finding a church.
+      </p>
+    </noscript>
     <header class="site-header">
       <div class="header-inner">
         <div class="brand">
@@ -113,11 +125,13 @@
             <select id="sortSelect">
               <option value="name-asc">A–Z Name</option>
               <option value="name-desc">Z–A Name</option>
+              <option value="distance">Nearest first</option>
             </select>
           </div>
         </div>
         <div class="search-row search-row-secondary">
           <div class="search-row-secondary-left">
+            <button id="nearMeBtn" class="btn-secondary">Near me</button>
             <button id="clearFilters" class="btn-secondary">Clear filters</button>
             <span id="resultCount" class="result-count" aria-live="polite"></span>
           </div>
