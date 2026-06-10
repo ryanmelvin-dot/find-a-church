@@ -1111,29 +1111,6 @@ a:hover {
   line-height: 1.6;
 }
 
-/* Cluster bubbles — red circles with church counts */
-.church-cluster {
-  background: rgba(212, 21, 48, 0.92);
-  color: #ffffff;
-  border: 2px solid #ffffff;
-  border-radius: 50%;
-  font-family: var(--font-sans);
-  font-weight: 700;
-  box-shadow: 0 2px 8px rgba(20, 24, 39, 0.30);
-}
-
-.church-cluster div {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-}
-
-.church-cluster-sm { width: 34px; height: 34px; margin-left: -17px; margin-top: -17px; font-size: 12px; }
-.church-cluster-md { width: 42px; height: 42px; margin-left: -21px; margin-top: -21px; font-size: 13px; }
-.church-cluster-lg { width: 50px; height: 50px; margin-left: -25px; margin-top: -25px; font-size: 14px; }
-
 /* Leaflet popup theming */
 .leaflet-popup-content-wrapper {
   border-radius: var(--radius-md);

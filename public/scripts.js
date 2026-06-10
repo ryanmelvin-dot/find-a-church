@@ -397,12 +397,19 @@ function wireControls() {
         }
         triggerFilter();
       },
-      () => {
+      (err) => {
         const sort = document.getElementById("sortSelect");
         if (sort && sort.value === "distance") sort.value = "name-asc";
+        // 1 = permission denied (browser/site setting), 2 = position
+        // unavailable (often the OS location service is off), 3 = timeout
+        const reason =
+          err.code === 1 ? "Location permission denied" :
+          err.code === 2 ? "Location unavailable" :
+                           "Location timed out";
+        console.warn(`Near me: ${reason} — ${err.message}`);
         if (nearMeBtn) {
-          nearMeBtn.textContent = "Location blocked";
-          setTimeout(() => { nearMeBtn.textContent = "Near me"; }, 2500);
+          nearMeBtn.textContent = reason;
+          setTimeout(() => { nearMeBtn.textContent = "Near me"; }, 3000);
         }
       },
       { maximumAge: 300000, timeout: 10000 }
@@ -1010,28 +1017,6 @@ function renderMapView(churches, container) {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
   }).addTo(leafletMap);
 
-  // Cluster dense areas (metro Indianapolis is unreadable as raw dots).
-  // Falls back to a plain layer group if the plugin didn't load.
-  const dotLayer = typeof L.markerClusterGroup === "function"
-    ? L.markerClusterGroup({
-        // Light-touch clustering: dots merge only when they would physically
-        // overlap (dots are ~17px wide), and clustering ends at zoom 10.
-        maxClusterRadius: 15,
-        disableClusteringAtZoom: 10,
-        showCoverageOnHover: false,
-        iconCreateFunction: (cluster) => {
-          const n    = cluster.getChildCount();
-          const size = n >= 100 ? "lg" : n >= 25 ? "md" : "sm";
-          return L.divIcon({
-            html: `<div>${n}</div>`,
-            className: `church-cluster church-cluster-${size}`,
-            iconSize: null,
-          });
-        },
-      })
-    : L.layerGroup();
-  dotLayer.addTo(leafletMap);
-
   const items   = [];
   const markers = [];
   let plotted   = 0;
@@ -1057,7 +1042,7 @@ function renderMapView(churches, container) {
         weight: 1.5,
         fillColor: "#d41530",
         fillOpacity: 0.92,
-      }).addTo(dotLayer);
+      }).addTo(leafletMap);
       // autoPan off so sweeping the cursor across dots doesn't drag the map
       marker.bindPopup(buildMapPopupHtml(church), { maxWidth: 260, autoPan: false });
       marker.on("click", () => highlightItem(i, true));
@@ -1079,16 +1064,8 @@ function renderMapView(churches, container) {
     const selectChurch = () => {
       highlightItem(i, false);
       if (marker) {
-        if (typeof dotLayer.zoomToShowLayer === "function") {
-          // Marker may be hidden inside a cluster — unfold it first
-          dotLayer.zoomToShowLayer(marker, () => {
-            leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 13));
-            marker.openPopup();
-          });
-        } else {
-          leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 13));
-          marker.openPopup();
-        }
+        leafletMap.setView(marker.getLatLng(), Math.max(leafletMap.getZoom(), 13));
+        marker.openPopup();
       } else {
         // No coordinates on file — show full details instead
         openChurchModal(church, item);
