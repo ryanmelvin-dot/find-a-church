@@ -375,8 +375,9 @@ function wireControls() {
   };
 
   const showDeniedHelp = () => setLocationStatus(
-    "Your browser is blocking location for this site. Click the lock icon next " +
-    "to the web address, set Location to Allow, then click the button again."
+    "Your browser is blocking location for this site. Click the icon at the left " +
+    "end of the web address (a lock or sliders), choose Site settings, set " +
+    "Location to Allow, then reload this page and click the button again."
   );
 
   function requestUserLocation(opts = {}) {
