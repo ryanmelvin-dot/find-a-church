@@ -367,11 +367,22 @@ function wireControls() {
   });
 
   // ── Near me ────────────────────────────────────────────────────────────
-  const nearMeBtn = document.getElementById("nearMeBtn");
+  const nearMeBtn    = document.getElementById("nearMeBtn");
+  const footerStatus = document.getElementById("footerLocationStatus");
 
-  function requestUserLocation() {
+  const setLocationStatus = (text) => {
+    if (footerStatus) footerStatus.textContent = text;
+  };
+
+  const showDeniedHelp = () => setLocationStatus(
+    "Your browser is blocking location for this site. Click the lock icon next " +
+    "to the web address, set Location to Allow, then click the button again."
+  );
+
+  function requestUserLocation(opts = {}) {
     if (!navigator.geolocation) {
       if (nearMeBtn) nearMeBtn.textContent = "Location unsupported";
+      setLocationStatus("This browser does not support location.");
       return;
     }
     // A Permissions-Policy header or an embedding app can forbid geolocation
@@ -383,9 +394,11 @@ function wireControls() {
         nearMeBtn.textContent = "Location unavailable here";
         setTimeout(() => { nearMeBtn.textContent = "Near me"; }, 2500);
       }
+      setLocationStatus("Location is not available in this viewer. Open the site in a regular browser tab.");
       return;
     }
     if (nearMeBtn) nearMeBtn.textContent = "Locating…";
+    setLocationStatus("Requesting your location…");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         userLoc = [pos.coords.latitude, pos.coords.longitude];
@@ -395,7 +408,11 @@ function wireControls() {
           nearMeBtn.textContent = "Near me";
           nearMeBtn.classList.add("is-active");
         }
+        setLocationStatus("Location enabled — churches are sorted nearest first.");
         triggerFilter();
+        if (opts.scrollToResults) {
+          document.querySelector(".search-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
       },
       (err) => {
         const sort = document.getElementById("sortSelect");
@@ -411,12 +428,33 @@ function wireControls() {
           nearMeBtn.textContent = reason;
           setTimeout(() => { nearMeBtn.textContent = "Near me"; }, 3000);
         }
+        if (err.code === 1) {
+          showDeniedHelp();
+        } else {
+          setLocationStatus(`${reason}. Please try again in a moment.`);
+        }
       },
       { maximumAge: 300000, timeout: 10000 }
     );
   }
 
-  nearMeBtn?.addEventListener("click", requestUserLocation);
+  nearMeBtn?.addEventListener("click", () => requestUserLocation());
+
+  // Footer control to (re)enable location. A hard "Block" can't be
+  // re-prompted by any website — in that case show how to reset it.
+  document.getElementById("footerLocationBtn")?.addEventListener("click", async () => {
+    setLocationStatus("");
+    try {
+      const perm = await navigator.permissions.query({ name: "geolocation" });
+      if (perm.state === "denied") {
+        showDeniedHelp();
+        return;
+      }
+    } catch {
+      // Permissions API unavailable — just attempt the request
+    }
+    requestUserLocation({ scrollToResults: true });
+  });
 
   document.getElementById("clearFilters")?.addEventListener("click", () => {
     ["searchInput", "dayFilter", "timeFilter", "districtFilter",
