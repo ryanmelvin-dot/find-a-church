@@ -1,5 +1,6 @@
 # Netlify configuration
 # Docs: https://docs.netlify.com/configure-builds/file-based-configuration/
+# Note: header changes only take effect on a fresh deploy of this file.
 
 [build]
   # Only the public/ folder is deployed — secrets (.env) and internal docs
