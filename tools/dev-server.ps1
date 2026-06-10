@@ -117,6 +117,8 @@ try {
         if ($full.StartsWith($publicDir, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path $full -PathType Leaf)) {
           $ext = [IO.Path]::GetExtension($full).ToLower()
           $res.ContentType = if ($mime[$ext]) { $mime[$ext] } else { "application/octet-stream" }
+          # Dev server: never let browsers cache, so edits always show up
+          $res.Headers["Cache-Control"] = "no-store"
           $bytes = [IO.File]::ReadAllBytes($full)
           $res.OutputStream.Write($bytes, 0, $bytes.Length)
         } else {
