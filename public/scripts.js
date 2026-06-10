@@ -374,6 +374,17 @@ function wireControls() {
       if (nearMeBtn) nearMeBtn.textContent = "Location unsupported";
       return;
     }
+    // A Permissions-Policy header or an embedding app can forbid geolocation
+    // outright — asking anyway only logs a console violation, so explain.
+    if (document.featurePolicy && !document.featurePolicy.allowsFeature("geolocation")) {
+      const sort = document.getElementById("sortSelect");
+      if (sort && sort.value === "distance") sort.value = "name-asc";
+      if (nearMeBtn) {
+        nearMeBtn.textContent = "Location unavailable here";
+        setTimeout(() => { nearMeBtn.textContent = "Near me"; }, 2500);
+      }
+      return;
+    }
     if (nearMeBtn) nearMeBtn.textContent = "Locating…";
     navigator.geolocation.getCurrentPosition(
       (pos) => {
