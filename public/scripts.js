@@ -571,6 +571,15 @@ function formatMiles(mi) {
   return mi < 10 ? `${mi.toFixed(1)} mi` : `${Math.round(mi)} mi`;
 }
 
+// Escaped address line HTML with the distance (when known) appended in bold
+function addressWithDistance(baseAddr, gcfa) {
+  const dist = distanceToChurch(gcfa);
+  const base = escapeHtml(baseAddr || "");
+  if (dist == null) return base;
+  const miles = `<strong class="addr-distance">${escapeHtml(formatMiles(dist))}</strong>`;
+  return base ? `${base} · ${miles}` : miles;
+}
+
 // ─── Shareable URLs ────────────────────────────────────────────────────────
 // Filters, view, and the open church are mirrored into the query string so
 // any state can be bookmarked or shared. Defaults are omitted to keep URLs
